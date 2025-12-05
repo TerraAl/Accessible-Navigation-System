@@ -359,7 +359,7 @@ class AccessibleNavigationSystem:
 
         # Ищем объекты недалеко от любой точки маршрута
         nearby_objects = []
-        step = max(1, len(base_route_coords) // 30)
+        step = max(1, len(base_route_coords) // 10)
         for i in range(0, len(base_route_coords), step):
             lat, lon = base_route_coords[i]
             cursor.execute(f"""
@@ -372,28 +372,67 @@ class AccessibleNavigationSystem:
             """, [lat, lat, lon, lon] + relevant_features)
             nearby_objects.extend(cursor.fetchall())
 
+        # Добавляем объекты рядом с началом и концом маршрута
+        start_nearby = []
+        end_nearby = []
+        start_lat, start_lon = start_coords_tuple
+        end_lat, end_lon = end_coords_tuple
+
+        cursor.execute(f"""
+            SELECT latitude, longitude, feature_type, description, address,
+                   ((latitude - ?) * (latitude - ?) + (longitude - ?) * (longitude - ?)) as dist
+            FROM accessibility_objects
+            WHERE feature_type IN ({placeholders})
+              AND latitude BETWEEN 54.15 AND 54.25 AND longitude BETWEEN 37.55 AND 37.70
+              AND dist < 0.0025  -- ~250м
+            ORDER BY dist LIMIT 3
+        """, [start_lat, start_lat, start_lon, start_lon] + relevant_features)
+        start_nearby = cursor.fetchall()
+
+        cursor.execute(f"""
+            SELECT latitude, longitude, feature_type, description, address,
+                   ((latitude - ?) * (latitude - ?) + (longitude - ?) * (longitude - ?)) as dist
+            FROM accessibility_objects
+            WHERE feature_type IN ({placeholders})
+              AND latitude BETWEEN 54.15 AND 54.25 AND longitude BETWEEN 37.55 AND 37.70
+              AND dist < 0.0025  -- ~250м
+            ORDER BY dist LIMIT 3
+        """, [end_lat, end_lat, end_lon, end_lon] + relevant_features)
+        end_nearby = cursor.fetchall()
+
         conn.close()
 
         # Убираем дубликаты
         seen = set()
         unique_objects = []
-        for obj in nearby_objects:
+        for obj in nearby_objects + start_nearby + end_nearby:
             key = (obj[0], obj[1])
             if key not in seen:
                 seen.add(key)
                 unique_objects.append(obj)
 
-        # 4. Выбираем до 4 лучших объектов (по приоритету + близости к маршруту)
+        # 4. Выбираем до 6 лучших объектов (по приоритету + близости + порядку следования)
         priorities = self.feature_priorities.get(mobility_type, {})
 
         def score_object(obj):
             lat, lon, ftype, desc, addr, dist = obj
             priority = priorities.get(ftype, 0)
-            distance_penalty = dist * 1000000  # штраф за отклонение
-            return priority * 1000 - distance_penalty
+            # Бонус за близость к началу/концу
+            start_dist = ((lat - start_lat)**2 + (lon - start_lon)**2)**0.5
+            end_dist = ((lat - end_lat)**2 + (lon - end_lon)**2)**0.5
+            position_bonus = max(0, 0.001 - min(start_dist, end_dist)) * 100000  # бонус за близость к началу/концу
+            distance_penalty = dist * 500000  # уменьшенный штраф
+            return priority * 1000 + position_bonus - distance_penalty
 
         unique_objects.sort(key=score_object, reverse=True)
-        best_objects = unique_objects[:4]
+        best_objects = unique_objects[:6]
+
+        # Сортируем выбранные объекты по расстоянию от начала (для логичного порядка)
+        def distance_from_start(obj):
+            lat, lon = obj[0], obj[1]
+            return ((lat - start_lat)**2 + (lon - start_lon)**2)**0.5
+
+        best_objects.sort(key=distance_from_start)
 
         # 5. Строим финальный маршрут: старт → лучшие объекты → финиш
         waypoints = [start_coords_tuple]
@@ -427,7 +466,7 @@ class AccessibleNavigationSystem:
         final_route.append(waypoints[-1])
 
         # Если крюк слишком большой — возвращаем короткий маршрут
-        if total_distance > base_distance * 1.4:  # не более чем на 40%
+        if total_distance > base_distance * 2.0:  # не более чем на 100%
             final_route = base_route_coords
             total_distance = base_data["distance"]
             total_minutes = base_duration
@@ -758,7 +797,7 @@ try:
                             <span class="icon">➕</span>Добавить объект доступности
                         </a>
 
-                        <button type="button" class="btn btn-voice" id="voiceBtn" style="display:none;">
+                        <button type="button" class="btn btn-voice" id="voiceBtn">
                             <span class="icon">🔊</span>Озвучить маршрут
                         </button>
                         </div>
@@ -1167,7 +1206,6 @@ try:
                         displayRoute(data);
                         document.getElementById('routeDescription').textContent = data.description;
                         document.getElementById('routeInfo').style.display = 'block';
-                        document.getElementById('voiceBtn').style.display = 'block';
                     } else {
                         if (data.error.includes('адрес')) {
                             alert('Объект не найден');
@@ -1511,10 +1549,10 @@ try:
                 }
                 .accessibility-buttons { margin-top: 20px; }
                 .btn-accessibility {
-                    background: rgba(102, 126, 234, 0.2);
-                    color: #667eea;
+                    background: #667eea;
+                    color: white;
                     border: 1px solid #667eea;
-                    padding: 8px 12px;
+                    padding: 10px 15px;
                     border-radius: 6px;
                     font-size: 0.9em;
                     cursor: pointer;
@@ -1522,7 +1560,7 @@ try:
                     transition: all 0.3s;
                 }
                 .btn-accessibility:hover {
-                    background: rgba(102, 126, 234, 0.3);
+                    background: #5a67d8;
                 }
                 .high-contrast {
                     background: #000 !important;
@@ -1790,28 +1828,35 @@ try:
                     border-radius: 8px;
                 }
                 .btn {
-                    padding: 10px 15px;
+                    padding: 12px 20px;
                     border: none;
                     border-radius: 8px;
-                    font-size: 1em;
+                    font-size: 1.1em;
                     font-weight: 600;
                     cursor: pointer;
                     transition: all 0.3s;
                     margin: 5px;
+                    min-width: 120px;
                 }
                 .btn-approve {
                     background: #10b981;
                     color: white;
+                    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
                 }
                 .btn-approve:hover {
                     background: #059669;
+                    transform: translateY(-1px);
+                    box-shadow: 0 4px 8px rgba(16, 185, 129, 0.4);
                 }
                 .btn-reject {
                     background: #ef4444;
                     color: white;
+                    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
                 }
                 .btn-reject:hover {
                     background: #dc2626;
+                    transform: translateY(-1px);
+                    box-shadow: 0 4px 8px rgba(239, 68, 68, 0.4);
                 }
                 .btn-secondary {
                     background: #f0f0f0;
@@ -1841,7 +1886,7 @@ try:
                 <div class="content">
                     {% if submissions %}
                         {% for sub in submissions %}
-                        <div class="submission">
+                        <div class="submission" data-id="{{ sub[0] }}">
                             <h3>{{ sub[1].replace('_', ' ').title() }}</h3>
                             <p><strong>Описание:</strong> {{ sub[2] }}</p>
                             <p><strong>Адрес:</strong> {{ sub[3] }}</p>
@@ -1867,7 +1912,7 @@ try:
                     fetch('/api/approve/' + id, { method: 'POST' })
                         .then(response => {
                             if (response.ok) {
-                                location.reload();
+                                removeSubmission(id);
                             } else {
                                 alert('Ошибка при одобрении');
                             }
@@ -1878,13 +1923,30 @@ try:
                         fetch('/api/reject/' + id, { method: 'POST' })
                             .then(response => {
                                 if (response.ok) {
-                                    location.reload();
+                                    removeSubmission(id);
                                 } else {
                                     alert('Ошибка при отклонении');
                                 }
                             });
                         }
                     }
+                function removeSubmission(id) {
+                    const submission = document.querySelector(`[data-id="${id}"]`);
+                    if (submission) {
+                        submission.remove();
+                        // Check if no submissions left
+                        const submissions = document.querySelectorAll('.submission');
+                        if (submissions.length === 0) {
+                            document.querySelector('.content').innerHTML = `
+                                <div class="no-submissions">
+                                    <h2>Нет ожидающих подтверждений</h2>
+                                    <p>Все объекты проверены</p>
+                                </div>
+                                <a href="/" class="btn btn-secondary">Назад к навигации</a>
+                            `;
+                        }
+                    }
+                }
             </script>
         </body>
         </html>
