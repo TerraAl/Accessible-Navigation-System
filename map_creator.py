@@ -79,7 +79,7 @@ class AccessibilityDatabase:
     def add_object(self, obj: AccessibilityObject) -> int:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("""INSERT INTO accessibility_objects 
+        cursor.execute("""INSERT INTO accessibility_objects
             (feature_type, description, latitude, longitude, address)
             VALUES (?, ?, ?, ?, ?)""",
             (obj.feature_type, obj.description, obj.latitude, obj.longitude, obj.address))
@@ -87,6 +87,38 @@ class AccessibilityDatabase:
         conn.commit()
         conn.close()
         return obj_id
+
+    def add_user_submission(self, feature_type: str, description: str, address: str, photo_path: str, lat: Optional[float] = None, lon: Optional[float] = None, submitted_by: str = "anonymous"):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""INSERT INTO user_submissions
+            (feature_type, description, address, photo_path, latitude, longitude, submitted_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (feature_type, description, address, photo_path, lat, lon, submitted_by))
+        conn.commit()
+        conn.close()
+
+    def get_pending_submissions(self):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM user_submissions WHERE status = 'pending'")
+        rows = cursor.fetchall()
+        conn.close()
+        return rows
+
+    def approve_submission(self, submission_id: int):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE user_submissions SET status = 'approved' WHERE id = ?", (submission_id,))
+        # Move to main table
+        cursor.execute("SELECT feature_type, description, latitude, longitude, address FROM user_submissions WHERE id = ?", (submission_id,))
+        row = cursor.fetchone()
+        if row:
+            cursor.execute("""INSERT INTO accessibility_objects
+                (feature_type, description, latitude, longitude, address)
+                VALUES (?, ?, ?, ?, ?)""", row)
+        conn.commit()
+        conn.close()
 
     def add_tula_accessibility_all(self):
         conn = sqlite3.connect(self.db_path)
@@ -412,12 +444,26 @@ class AccessibleNavigationSystem:
 
 # Flask веб-приложение
 try:
-    from flask import Flask, render_template_string, request, jsonify
+    from flask import Flask, render_template_string, request, jsonify, redirect, url_for, send_from_directory
     from flask_cors import CORS
-    
+    from werkzeug.utils import secure_filename
+    import os
+    from xml_parser import XMLDataParser
+
     app = Flask(__name__)
     CORS(app)
+    app.config['UPLOAD_FOLDER'] = 'uploads'
+    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     nav_system = AccessibleNavigationSystem()
+
+    # Load organizations
+    parser = XMLDataParser()
+    try:
+        parser.parse_organizations_xml("xml/Файл_соцподдержка_1.xml")
+    except FileNotFoundError:
+        print("XML file not found, proceeding without organizations")
+    organizations = parser.social_organizations
     
     HTML_TEMPLATE = """
     <!DOCTYPE html>
@@ -452,6 +498,8 @@ try:
             }
             .header h1 { font-size: 2.5em; margin-bottom: 10px; }
             .header p { font-size: 1.2em; opacity: 0.9; }
+            .header .links { margin-top: 20px; }
+            .header .links a { color: white; margin: 0 10px; text-decoration: none; }
             .content {
                 display: grid;
                 grid-template-columns: 400px 1fr;
@@ -572,6 +620,9 @@ try:
             <div class="header">
                 <h1>♿ Доступная навигация</h1>
                 <p>Персонализированные маршруты для людей с ограниченными возможностями</p>
+                <div class="links">
+                    <a href="/submit">Добавить объект</a>
+                </div>
             </div>
             <div class="content">
                 <div class="sidebar">
@@ -588,7 +639,8 @@ try:
                             <label for="endAddress">
                                 <span class="icon">🎯</span>Куда
                             </label>
-                            <input type="text" id="endAddress" placeholder="Введите адрес назначения" required>
+                            <input type="text" id="endAddress" list="destinations" placeholder="Введите адрес или выберите организацию" required>
+                            <datalist id="destinations"></datalist>
                         </div>
                         
                         <div class="form-group">
@@ -605,11 +657,15 @@ try:
                         <button type="submit" class="btn btn-primary">
                             <span class="icon">🗺️</span>Построить маршрут
                         </button>
-                        
+
                         <button type="button" class="btn btn-secondary" id="useLocationBtn">
                             <span class="icon">📱</span>Использовать мою геолокацию
                         </button>
-                        
+
+                        <a href="/submit" class="btn btn-secondary">
+                            <span class="icon">➕</span>Добавить объект доступности
+                        </a>
+
                         <button type="button" class="btn btn-voice" id="voiceBtn" style="display:none;">
                             <span class="icon">🔊</span>Озвучить маршрут
                         </button>
@@ -640,7 +696,7 @@ try:
                 style: 'https://tiles.stadiamaps.com/styles/outdoors.json',
                 // Альтернатива: стиль от OpenStreetMap France (очень красивый)
                 // style: 'https://tiles.stadiamaps.com/styles/osm_bright.json',
-                center: [30.315, 59.935], // центр СПб
+                center: [37.6175, 54.1931], // центр Тулы
                 zoom: 12,
                 pitch: 30,     // лёгкий 3D-наклон
                 bearing: 0
@@ -714,7 +770,19 @@ try:
                     .addTo(map);
 
                 // Объекты доступности
+                const usedPositions = new Set();
                 data.accessibility_objects.forEach(obj => {
+                    let [lon, lat] = [obj.longitude, obj.latitude];
+                    const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+                    let attempts = 0;
+                    while (usedPositions.has(key) && attempts < 10) {
+                        lat += (Math.random() - 0.5) * 0.0005; // ~50m jitter
+                        lon += (Math.random() - 0.5) * 0.0005;
+                        key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+                        attempts++;
+                    }
+                    usedPositions.add(key);
+
                     const color = {
                         'пандус_стационарный': '#3b82f6',
                         'лифт': '#8b5cf6',
@@ -725,7 +793,7 @@ try:
                     }[obj.feature_type] || '#6b7280';
 
                     new maplibregl.Marker({ color })
-                        .setLngLat([obj.longitude, obj.latitude])
+                        .setLngLat([lon, lat])
                         .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
                             <b>${obj.feature_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</b><br>
                             ${obj.description}<br>
@@ -822,7 +890,24 @@ try:
             // Загрузка карты
             map.on('load', () => {
                 console.log("MapLibre GL JS загружен — современная карта готова!");
+                loadDestinations();
             });
+
+            // Загрузка списка организаций
+            async function loadDestinations() {
+                try {
+                    const res = await fetch('/api/organizations');
+                    const orgs = await res.json();
+                    const datalist = document.getElementById('destinations');
+                    orgs.forEach(org => {
+                        const option = document.createElement('option');
+                        option.value = org.name + ', ' + org.address;
+                        datalist.appendChild(option);
+                    });
+                } catch (err) {
+                    console.error('Failed to load destinations:', err);
+                }
+            }
         </script>
     </body>
     </html>
@@ -846,17 +931,7 @@ try:
         except ValueError:
             return jsonify({"error": "Неверный тип мобильности"}), 400
 
-        # Если нужно — добавим примеры данных при первом запуске
-        try:
-            conn = sqlite3.connect("accessibility.db")
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM accessibility_objects")
-            count = cursor.fetchone()[0]
-            if count == 0:
-                nav_system.db.add_sample_data()
-            conn.close()
-        except:
-            pass
+        # Данные уже добавлены в __init__
 
         result = nav_system.find_route(
             start_address=start_address,
@@ -867,10 +942,327 @@ try:
 
         return jsonify(result)
 
+    @app.route('/api/organizations')
+    def api_organizations():
+        # Return list of organizations for destination selection
+        orgs = [{"name": org.name, "address": org.address, "categories": org.served_disability_categories} for org in organizations[:50]]  # Limit to 50 for UI
+        return jsonify(orgs)
+
+    @app.route('/submit')
+    def submit_page():
+        return render_template_string("""
+        <!DOCTYPE html>
+        <html lang="ru">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Добавить объект доступности</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    padding: 20px;
+                }
+                .container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    overflow: hidden;
+                }
+                .header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    text-align: center;
+                }
+                .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+                .header p { font-size: 1.2em; opacity: 0.9; }
+                .content {
+                    padding: 30px;
+                }
+                .form-group {
+                    margin-bottom: 20px;
+                }
+                .form-group label {
+                    display: block;
+                    margin-bottom: 8px;
+                    font-weight: 600;
+                    color: #333;
+                }
+                .form-group input, .form-group select, .form-group textarea {
+                    width: 100%;
+                    padding: 12px;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 8px;
+                    font-size: 1em;
+                    transition: border-color 0.3s;
+                }
+                .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+                    outline: none;
+                    border-color: #667eea;
+                }
+                .btn {
+                    width: 100%;
+                    padding: 15px;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 1.1em;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                    margin-bottom: 10px;
+                }
+                .btn-primary {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                }
+                .btn-primary:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                }
+                .btn-secondary {
+                    background: #f0f0f0;
+                    color: #333;
+                }
+                .btn-secondary:hover {
+                    background: #e0e0e0;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>♿ Добавить объект доступности</h1>
+                    <p>Помогите сделать город доступнее</p>
+                </div>
+                <div class="content">
+                    <form action="/api/submit" method="post" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label>Тип объекта:</label>
+                            <select name="feature_type" required>
+                                <option value="пандус_стационарный">Пандус стационарный</option>
+                                <option value="пандус_откидной">Пандус откидной</option>
+                                <option value="лифт">Лифт</option>
+                                <option value="тактильная_плитка_направляющая">Тактильная плитка направляющая</option>
+                                <option value="светофор_звуковой">Звуковой светофор</option>
+                                <option value="поручни">Поручни</option>
+                                <option value="понижение_бордюра">Понижение бордюра</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Описание:</label>
+                            <textarea name="description" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Адрес:</label>
+                            <input type="text" name="address" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Фото:</label>
+                            <input type="file" name="photo" accept="image/*" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Отправить на проверку</button>
+                        <a href="/" class="btn btn-secondary">Назад</a>
+                    </form>
+                </div>
+            </div>
+        </body>
+        </html>
+        """)
+
+    @app.route('/api/submit', methods=['POST'])
+    def api_submit():
+        feature_type = request.form['feature_type']
+        description = request.form['description']
+        address = request.form['address']
+        photo = request.files['photo']
+        if photo and photo.filename:
+            filename = secure_filename(photo.filename)
+            photo_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            photo.save(photo_path)
+        else:
+            photo_path = ""
+        nav_system.db.add_user_submission(feature_type, description, address, photo_path)
+        return redirect(url_for('submit_page'))
+
+    @app.route('/admin')
+    def admin_page():
+        submissions = nav_system.db.get_pending_submissions()
+        return render_template_string("""
+        <!DOCTYPE html>
+        <html lang="ru">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Админ панель</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    padding: 20px;
+                }
+                .container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    overflow: hidden;
+                }
+                .header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    text-align: center;
+                }
+                .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+                .header p { font-size: 1.2em; opacity: 0.9; }
+                .content {
+                    padding: 30px;
+                }
+                .submission {
+                    border: 2px solid #f0f0f0;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 20px 0;
+                    background: #fafafa;
+                }
+                .submission h3 {
+                    margin-bottom: 10px;
+                    color: #667eea;
+                }
+                .submission p {
+                    margin: 5px 0;
+                }
+                .submission img {
+                    max-width: 300px;
+                    margin: 10px 0;
+                    border-radius: 8px;
+                }
+                .btn {
+                    padding: 10px 15px;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 1em;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                    margin: 5px;
+                }
+                .btn-approve {
+                    background: #10b981;
+                    color: white;
+                }
+                .btn-approve:hover {
+                    background: #059669;
+                }
+                .btn-reject {
+                    background: #ef4444;
+                    color: white;
+                }
+                .btn-reject:hover {
+                    background: #dc2626;
+                }
+                .btn-secondary {
+                    background: #f0f0f0;
+                    color: #333;
+                }
+                .btn-secondary:hover {
+                    background: #e0e0e0;
+                }
+                .no-submissions {
+                    text-align: center;
+                    padding: 50px;
+                    color: #666;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔧 Админ панель</h1>
+                    <p>Управление объектами доступности</p>
+                </div>
+                <div class="content">
+                    {% if submissions %}
+                        {% for sub in submissions %}
+                        <div class="submission">
+                            <h3>{{ sub[1].replace('_', ' ').title() }}</h3>
+                            <p><strong>Описание:</strong> {{ sub[2] }}</p>
+                            <p><strong>Адрес:</strong> {{ sub[3] }}</p>
+                            <p><strong>Отправитель:</strong> {{ sub[6] or 'Аноним' }}</p>
+                            {% if sub[4] %}
+                            <img src="/uploads/{{ sub[4].split('/')[-1] }}" alt="Фото объекта">
+                            {% endif %}
+                            <button class="btn btn-approve" onclick="approve({{ sub[0] }})">✅ Одобрить</button>
+                            <button class="btn btn-reject" onclick="reject({{ sub[0] }})">❌ Отклонить</button>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="no-submissions">
+                            <h2>Нет ожидающих подтверждений</h2>
+                            <p>Все объекты проверены</p>
+                        </div>
+                    {% endif %}
+                    <a href="/" class="btn btn-secondary">Назад к навигации</a>
+                </div>
+            </div>
+            <script>
+                function approve(id) {
+                    fetch('/api/approve/' + id, { method: 'POST' })
+                        .then(response => {
+                            if (response.ok) {
+                                location.reload();
+                            } else {
+                                alert('Ошибка при одобрении');
+                            }
+                        });
+                }
+                function reject(id) {
+                    if (confirm('Отклонить объект?')) {
+                        fetch('/api/reject/' + id, { method: 'POST' })
+                            .then(response => {
+                                if (response.ok) {
+                                    location.reload();
+                                } else {
+                                    alert('Ошибка при отклонении');
+                                }
+                            });
+                        }
+                    }
+            </script>
+        </body>
+        </html>
+        """, submissions=submissions)
+
+    @app.route('/api/approve/<int:submission_id>', methods=['POST'])
+    def api_approve(submission_id):
+        nav_system.db.approve_submission(submission_id)
+        return '', 200
+
+    @app.route('/api/reject/<int:submission_id>', methods=['POST'])
+    def api_reject(submission_id):
+        conn = sqlite3.connect("accessibility.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE user_submissions SET status = 'rejected' WHERE id = ?", (submission_id,))
+        conn.commit()
+        conn.close()
+        return '', 200
+
+    @app.route('/uploads/<filename>')
+    def uploaded_file(filename):
+        return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
     if __name__ == '__main__':
         print("Запуск доступной навигации...")
-        print("Откройте в браузере: http://127.0.0.1:5000")
-        app.run(debug=True, port=5000)
+        print("Откройте в браузере: http://127.0.0.1:5001")
+        app.run(debug=True, host='0.0.0.0', port=5000)
 
 except ImportError:
     print("Для запуска веб-интерфейса установите: pip install flask flask-cors requests")
