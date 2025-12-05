@@ -133,10 +133,10 @@ class AccessibilityDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("UPDATE user_submissions SET status = 'approved' WHERE id = ?", (submission_id,))
-        # Move to main table
+        # Move to main table if coordinates are available
         cursor.execute("SELECT feature_type, description, latitude, longitude, address FROM user_submissions WHERE id = ?", (submission_id,))
         row = cursor.fetchone()
-        if row:
+        if row and row[2] is not None and row[3] is not None:
             cursor.execute("""INSERT INTO accessibility_objects
                 (feature_type, description, latitude, longitude, address)
                 VALUES (?, ?, ?, ?, ?)""", row)
@@ -638,6 +638,21 @@ try:
                 color: #666;
                 margin-top: 10px;
             }
+            @media (max-width: 900px) {
+                .content {
+                    grid-template-columns: 1fr;
+                    grid-template-rows: 1fr auto;
+                }
+                .sidebar {
+                    border-right: none;
+                    border-bottom: 2px solid #f0f0f0;
+                    order: 2;
+                }
+                #map {
+                    order: 1;
+                    height: 50vh;
+                }
+            }
         </style>
     </head>
     <body>
@@ -1032,16 +1047,23 @@ try:
                     outline: none;
                     border-color: #667eea;
                 }
+                #routeForm {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 15px;
+                }
                 .btn {
                     width: 100%;
                     padding: 15px;
                     border: none;
                     border-radius: 8px;
-                    font-size: 1.1em;
+                    font-size: 1em;
                     font-weight: 600;
                     cursor: pointer;
                     transition: all 0.3s;
-                    margin-bottom: 10px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 .btn-primary {
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1280,11 +1302,16 @@ try:
 
     @app.route('/api/reject/<int:submission_id>', methods=['POST'])
     def api_reject(submission_id):
-        conn = sqlite3.connect("accessibility.db")
-        cursor = conn.cursor()
-        cursor.execute("UPDATE user_submissions SET status = 'rejected' WHERE id = ?", (submission_id,))
-        conn.commit()
-        conn.close()
+        try:
+            conn = sqlite3.connect("accessibility.db", timeout=10)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE user_submissions SET status = 'rejected' WHERE id = ?", (submission_id,))
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            return jsonify({"error": "Database locked, try again"}), 500
+        finally:
+            if 'conn' in locals():
+                conn.close()
         return '', 200
 
     @app.before_request
