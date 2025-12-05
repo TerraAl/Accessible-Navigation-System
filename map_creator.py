@@ -320,7 +320,7 @@ class AccessibleNavigationSystem:
         if start_coords:
             start_coords_tuple = start_coords
             start_addr = "Выбранное место на карте"
-        elif start_address.lower() == "current" and user_location:
+        elif start_address.lower() == "текущий" and user_location:
             start_coords_tuple = user_location
             start_addr = "Текущее местоположение"
         else:
@@ -531,12 +531,21 @@ try:
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     nav_system = AccessibleNavigationSystem()
 
-    # Load organizations
+    # Load organizations and infrastructure
     parser = XMLDataParser()
     try:
         parser.parse_organizations_xml("xml/Файл_соцподдержка_1.xml")
+        print(f"Loaded {len(parser.social_organizations)} organizations")
     except FileNotFoundError:
-        print("XML file not found, proceeding without organizations")
+        print("Organizations XML not found, proceeding without organizations")
+
+    try:
+        parser.parse_infrastructure_xml("xml/Файл_соцподдержка_2.xml")
+        parser.populate_database()
+        print(f"Loaded infrastructure data from XML")
+    except FileNotFoundError:
+        print("Infrastructure XML not found, using default data")
+
     organizations = parser.social_organizations
     
     HTML_TEMPLATE = """
@@ -761,7 +770,7 @@ try:
                             <label for="startAddress">
                                 <span class="icon">📍</span>Откуда
                             </label>
-                            <input type="text" id="startAddress" placeholder="Введите адрес или 'current'" required title="Введите адрес отправления или 'current' для использования геолокации">
+                            <input type="text" id="startAddress" placeholder="Введите адрес или 'текущий'" required title="Введите адрес отправления или 'текущий' для использования геолокации">
                             <div class="geolocation-status" id="geoStatus"></div>
                         </div>
                         
@@ -969,7 +978,7 @@ try:
 
             document.getElementById('startAddress').addEventListener('input', async e => {
                 const query = e.target.value.toLowerCase();
-                if (query.length < 1 || query === 'current') {
+                if (query.length < 1 || query === 'текущий') {
                     startSuggestionBox.style.display = 'none';
                     return;
                 }
@@ -1251,19 +1260,28 @@ try:
 
             // Загрузка списка организаций
             async function loadDestinations() {
+                const mobilityType = document.getElementById('mobilityType').value;
                 try {
-                    const res = await fetch('/api/organizations');
+                    const res = await fetch('/api/organizations?mobility_type=' + encodeURIComponent(mobilityType));
                     const orgs = await res.json();
                     const datalist = document.getElementById('destinations');
+                    datalist.innerHTML = '';
                     orgs.forEach(org => {
                         const option = document.createElement('option');
-                        option.value = org.name + ', ' + org.address;
+                        let value = org.name + ', ' + org.address;
+                        if (org.warning) {
+                            value += ' ⚠️ ' + org.warning;
+                        }
+                        option.value = value;
                         datalist.appendChild(option);
                     });
                 } catch (err) {
                     console.error('Failed to load destinations:', err);
                 }
             }
+
+            // Reload destinations when mobility type changes
+            document.getElementById('mobilityType').addEventListener('change', loadDestinations);
 
             // Accessibility features
             let voiceMode = false;
@@ -1351,9 +1369,29 @@ try:
 
     @app.route('/api/organizations')
     def api_organizations():
-        # Return list of organizations for destination selection
-        orgs = [{"name": org.name, "address": org.address, "categories": org.served_disability_categories} for org in organizations[:50]]  # Limit to 50 for UI
+        mobility_type = request.args.get('mobility_type')
+        orgs = []
+        for org in organizations[:100]:  # Show more organizations
+            serves = _matches_disability(org.served_disability_categories, mobility_type) if mobility_type else True
+            orgs.append({
+                "name": org.name,
+                "address": org.address,
+                "categories": org.served_disability_categories,
+                "serves_current_type": serves,
+                "warning": "Не обслуживает выбранный тип инвалидности" if mobility_type and not serves else ""
+            })
         return jsonify(orgs)
+
+    def _matches_disability(categories, mobility_type):
+        """Check if organization serves the given disability type"""
+        # Map mobility types to possible category names in the XML
+        mapping = {
+            "колясочник": ["инвалиды-колясочники", "колясочники", "опорно-двигательные", "двигательные"],
+            "слабовидящий": ["слабовидящие", "инвалиды по зрению", "слепые", "зрения"],
+            "опора на трость": ["инвалиды с поражением опорно-двигательного аппарата", "травмы", "пожилые", "двигательные"]
+        }
+        target_categories = mapping.get(mobility_type, [])
+        return any(any(cat.lower() in category.lower() for cat in target_categories) for category in categories)
 
     def clean_address(full_address):
         parts = full_address.split(', ')
