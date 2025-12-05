@@ -73,6 +73,29 @@ class AccessibilityDatabase:
             address TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS user_submissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feature_type TEXT NOT NULL,
+            description TEXT,
+            address TEXT NOT NULL,
+            photo_path TEXT,
+            latitude REAL,
+            longitude REAL,
+            submitted_by TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS admins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            must_change_password INTEGER DEFAULT 1
+        )""")
+        # Insert default admin if not exists
+        cursor.execute("SELECT COUNT(*) FROM admins WHERE username = 'admin'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("INSERT INTO admins (username, password, must_change_password) VALUES (?, ?, ?)",
+                           ('admin', generate_password_hash('admin'), 1))
         conn.commit()
         conn.close()
 
@@ -444,14 +467,16 @@ class AccessibleNavigationSystem:
 
 # Flask веб-приложение
 try:
-    from flask import Flask, render_template_string, request, jsonify, redirect, url_for, send_from_directory
+    from flask import Flask, render_template_string, request, jsonify, redirect, url_for, send_from_directory, session, flash
     from flask_cors import CORS
     from werkzeug.utils import secure_filename
+    from werkzeug.security import generate_password_hash, check_password_hash
     import os
     from xml_parser import XMLDataParser
 
     app = Flask(__name__)
     CORS(app)
+    app.secret_key = 'supersecretkey'
     app.config['UPLOAD_FOLDER'] = 'uploads'
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -981,6 +1006,8 @@ try:
                 }
                 .header h1 { font-size: 2.5em; margin-bottom: 10px; }
                 .header p { font-size: 1.2em; opacity: 0.9; }
+                .header .admin-links { margin-top: 20px; }
+                .header .admin-links a { color: white; margin: 0 10px; text-decoration: none; }
                 .content {
                     padding: 30px;
                 }
@@ -1188,6 +1215,11 @@ try:
                 <div class="header">
                     <h1>🔧 Админ панель</h1>
                     <p>Управление объектами доступности</p>
+                    <div class="admin-links">
+                        <a href="/admin/change_password">Изменить пароль</a>
+                        <a href="/admin/add_admin">Добавить админа</a>
+                        <a href="/admin/logout">Выйти</a>
+                    </div>
                 </div>
                 <div class="content">
                     {% if submissions %}
@@ -1254,6 +1286,345 @@ try:
         conn.commit()
         conn.close()
         return '', 200
+
+    @app.before_request
+    def require_admin():
+        if request.path.startswith('/admin') and request.path != '/admin/login' and request.path != '/admin/change_password':
+            if not session.get('admin'):
+                return redirect(url_for('admin_login'))
+
+    @app.route('/admin/login', methods=['GET', 'POST'])
+    def admin_login():
+        if request.method == 'POST':
+            username = request.form['username']
+            password = request.form['password']
+            conn = sqlite3.connect("accessibility.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT password, must_change_password FROM admins WHERE username = ?", (username,))
+            row = cursor.fetchone()
+            conn.close()
+            if row and check_password_hash(row[0], password):
+                session['admin'] = username
+                if row[1]:
+                    return redirect(url_for('change_password'))
+                return redirect(url_for('admin_page'))
+            flash('Неверные учетные данные')
+        return render_template_string("""
+        <!DOCTYPE html>
+        <html lang="ru">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Вход в админ панель</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .container {
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    padding: 40px;
+                    width: 100%;
+                    max-width: 400px;
+                }
+                .form-group {
+                    margin-bottom: 20px;
+                }
+                .form-group label {
+                    display: block;
+                    margin-bottom: 8px;
+                    font-weight: 600;
+                    color: #333;
+                }
+                .form-group input {
+                    width: 100%;
+                    padding: 12px;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 8px;
+                    font-size: 1em;
+                    transition: border-color 0.3s;
+                }
+                .form-group input:focus {
+                    outline: none;
+                    border-color: #667eea;
+                }
+                .btn {
+                    width: 100%;
+                    padding: 15px;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 1.1em;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                }
+                .btn:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                }
+                .flash {
+                    color: red;
+                    margin-bottom: 20px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1 style="text-align: center; margin-bottom: 30px;">Вход в админ панель</h1>
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        <div class="flash">{{ messages[0] }}</div>
+                    {% endif %}
+                {% endwith %}
+                <form method="post">
+                    <div class="form-group">
+                        <label for="username">Имя пользователя:</label>
+                        <input type="text" id="username" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Пароль:</label>
+                        <input type="password" id="password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn">Войти</button>
+                </form>
+            </div>
+        </body>
+        </html>
+        """)
+
+    @app.route('/admin/change_password', methods=['GET', 'POST'])
+    def change_password():
+        if not session.get('admin'):
+            return redirect(url_for('admin_login'))
+        if request.method == 'POST':
+            new_password = request.form['new_password']
+            confirm_password = request.form['confirm_password']
+            if new_password != confirm_password:
+                flash('Пароли не совпадают')
+                return redirect(request.url)
+            conn = sqlite3.connect("accessibility.db")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE admins SET password = ?, must_change_password = 0 WHERE username = ?",
+                           (generate_password_hash(new_password), session['admin']))
+            conn.commit()
+            conn.close()
+            flash('Пароль изменен')
+            return redirect(url_for('admin_page'))
+        return render_template_string("""
+        <!DOCTYPE html>
+        <html lang="ru">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Изменить пароль</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .container {
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    padding: 40px;
+                    width: 100%;
+                    max-width: 400px;
+                }
+                .form-group {
+                    margin-bottom: 20px;
+                }
+                .form-group label {
+                    display: block;
+                    margin-bottom: 8px;
+                    font-weight: 600;
+                    color: #333;
+                }
+                .form-group input {
+                    width: 100%;
+                    padding: 12px;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 8px;
+                    font-size: 1em;
+                    transition: border-color 0.3s;
+                }
+                .form-group input:focus {
+                    outline: none;
+                    border-color: #667eea;
+                }
+                .btn {
+                    width: 100%;
+                    padding: 15px;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 1.1em;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                }
+                .btn:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                }
+                .flash {
+                    color: red;
+                    margin-bottom: 20px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1 style="text-align: center; margin-bottom: 30px;">Изменить пароль</h1>
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        <div class="flash">{{ messages[0] }}</div>
+                    {% endif %}
+                {% endwith %}
+                <form method="post">
+                    <div class="form-group">
+                        <label for="new_password">Новый пароль:</label>
+                        <input type="password" id="new_password" name="new_password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirm_password">Подтвердить пароль:</label>
+                        <input type="password" id="confirm_password" name="confirm_password" required>
+                    </div>
+                    <button type="submit" class="btn">Изменить</button>
+                </form>
+            </div>
+        </body>
+        </html>
+        """)
+
+    @app.route('/admin/add_admin', methods=['GET', 'POST'])
+    def add_admin():
+        if not session.get('admin'):
+            return redirect(url_for('admin_login'))
+        if request.method == 'POST':
+            username = request.form['username']
+            password = request.form['password']
+            conn = sqlite3.connect("accessibility.db")
+            cursor = conn.cursor()
+            try:
+                cursor.execute("INSERT INTO admins (username, password, must_change_password) VALUES (?, ?, ?)",
+                               (username, generate_password_hash(password), 0))
+                conn.commit()
+                flash('Админ добавлен')
+            except sqlite3.IntegrityError:
+                flash('Имя пользователя уже существует')
+            conn.close()
+            return redirect(url_for('admin_page'))
+        return render_template_string("""
+        <!DOCTYPE html>
+        <html lang="ru">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Добавить админа</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .container {
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    padding: 40px;
+                    width: 100%;
+                    max-width: 400px;
+                }
+                .form-group {
+                    margin-bottom: 20px;
+                }
+                .form-group label {
+                    display: block;
+                    margin-bottom: 8px;
+                    font-weight: 600;
+                    color: #333;
+                }
+                .form-group input {
+                    width: 100%;
+                    padding: 12px;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 8px;
+                    font-size: 1em;
+                    transition: border-color 0.3s;
+                }
+                .form-group input:focus {
+                    outline: none;
+                    border-color: #667eea;
+                }
+                .btn {
+                    width: 100%;
+                    padding: 15px;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 1.1em;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                }
+                .btn:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                }
+                .flash {
+                    color: red;
+                    margin-bottom: 20px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1 style="text-align: center; margin-bottom: 30px;">Добавить админа</h1>
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        <div class="flash">{{ messages[0] }}</div>
+                    {% endif %}
+                {% endwith %}
+                <form method="post">
+                    <div class="form-group">
+                        <label for="username">Имя пользователя:</label>
+                        <input type="text" id="username" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Пароль:</label>
+                        <input type="password" id="password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn">Добавить</button>
+                </form>
+            </div>
+        </body>
+        </html>
+        """)
+
+    @app.route('/admin/logout')
+    def logout():
+        session.pop('admin', None)
+        return redirect(url_for('admin_login'))
 
     @app.route('/uploads/<filename>')
     def uploaded_file(filename):
