@@ -7,6 +7,8 @@ from enum import Enum
 import requests
 from datetime import datetime
 import math
+import os
+import shutil
 
 
 class MobilityType(Enum):
@@ -56,12 +58,14 @@ class RouteSegment:
 # 1. AccessibilityDatabase — 60 уникальных объектов в Туле (по 20 на тип)
 # ===================================================================
 class AccessibilityDatabase:
-    def __init__(self, db_path: str = "accessibility.db"):
+    def __init__(self, db_path: str = "db/accessibility.db"):
         self.db_path = db_path
         self.init_database()
         self.add_tula_accessibility_all()  # ← 60 объектов!
 
     def init_database(self):
+        # Ensure the database directory exists
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""CREATE TABLE IF NOT EXISTS accessibility_objects (
@@ -292,7 +296,7 @@ class OpenStreetMapAPI:
 # AccessibleNavigationSystem — УМНЫЙ маршрут: короткий + приоритет доступности
 # ===================================================================
 class AccessibleNavigationSystem:
-    def __init__(self, db_path: str = "accessibility.db"):
+    def __init__(self, db_path: str = "db/accessibility.db"):
         self.db = AccessibilityDatabase(db_path)
         self.osm = OpenStreetMapAPI()
         # Приоритеты для каждого типа
@@ -541,7 +545,7 @@ try:
 
     try:
         parser.parse_infrastructure_xml("xml/Файл_соцподдержка_2.xml")
-        parser.populate_database()
+        parser.populate_database(nav_system.db.db_path)
         print(f"Loaded infrastructure data from XML")
     except FileNotFoundError:
         print("Infrastructure XML not found, using default data")
@@ -1438,7 +1442,7 @@ try:
         query = request.args.get('q', '').strip().lower()
         if not query:
             return jsonify([])
-        conn = sqlite3.connect("accessibility.db")
+        conn = sqlite3.connect(nav_system.db.db_path)
         cursor = conn.cursor()
         # Get from accessibility_objects
         cursor.execute("SELECT DISTINCT address FROM accessibility_objects WHERE LOWER(address) LIKE ? LIMIT 5", ('%' + query + '%',))
@@ -1998,7 +2002,7 @@ try:
     @app.route('/api/reject/<int:submission_id>', methods=['POST'])
     def api_reject(submission_id):
         try:
-            conn = sqlite3.connect("accessibility.db", timeout=10)
+            conn = sqlite3.connect(nav_system.db.db_path, timeout=10)
             cursor = conn.cursor()
             cursor.execute("UPDATE user_submissions SET status = 'rejected' WHERE id = ?", (submission_id,))
             conn.commit()
@@ -2020,7 +2024,7 @@ try:
         if request.method == 'POST':
             username = request.form['username']
             password = request.form['password']
-            conn = sqlite3.connect("accessibility.db")
+            conn = sqlite3.connect(nav_system.db.db_path)
             cursor = conn.cursor()
             cursor.execute("SELECT password, must_change_password FROM admins WHERE username = ?", (username,))
             row = cursor.fetchone()
@@ -2133,7 +2137,7 @@ try:
             if new_password != confirm_password:
                 flash('Пароли не совпадают')
                 return redirect(request.url)
-            conn = sqlite3.connect("accessibility.db")
+            conn = sqlite3.connect(nav_system.db.db_path)
             cursor = conn.cursor()
             cursor.execute("UPDATE admins SET password = ?, must_change_password = 0 WHERE username = ?",
                            (generate_password_hash(new_password), session['admin']))
@@ -2240,7 +2244,7 @@ try:
         if request.method == 'POST':
             username = request.form['username']
             password = request.form['password']
-            conn = sqlite3.connect("accessibility.db")
+            conn = sqlite3.connect(nav_system.db.db_path)
             cursor = conn.cursor()
             try:
                 cursor.execute("INSERT INTO admins (username, password, must_change_password) VALUES (?, ?, ?)",
