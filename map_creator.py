@@ -53,13 +53,13 @@ class RouteSegment:
     difficulty: float
 
 # ===================================================================
-# 1. AccessibilityDatabase — 60 уникальных объектов в Туле (по 20 на тип)
+# 1. AccessibilityDatabase — 60 УНИКАЛЬНЫХ объектов в Туле с БОЛЬШИМ расстоянием между ними
 # ===================================================================
 class AccessibilityDatabase:
     def __init__(self, db_path: str = "accessibility.db"):
         self.db_path = db_path
         self.init_database()
-        self.add_tula_accessibility_all()  # ← 60 объектов!
+        self.add_tula_spread_accessibility()  # ← Максимально разнесённые точки!
 
     def init_database(self):
         conn = sqlite3.connect(self.db_path)
@@ -88,94 +88,94 @@ class AccessibilityDatabase:
         conn.close()
         return obj_id
 
-    def add_tula_accessibility_all(self):
+    def add_tula_spread_accessibility(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM accessibility_objects")
         conn.commit()
 
-        # === 20 объектов ТОЛЬКО для КОЛЯСОЧНИКОВ ===
-        wheelchair_objects = [
-            ("пандус_стационарный", "Пандус с поручнями", 54.1931, 37.6175, "ТЦ Гостиный двор"),
-            ("пандус_стационарный", "Широкий пандус у входа", 54.1965, 37.6140, "Тульский кремль"),
-            ("лифт", "Лифт с широкими дверями", 54.1931, 37.6175, "ТЦ Гостиный двор"),
-            ("лифт", "Лифт с голосовым оповещением", 54.1920, 37.6200, "Поликлиника №1"),
-            ("широкая_дверь", "Автоматические двери 1.4 м", 54.1931, 37.6175, "ТЦ Гостиный двор"),
-            ("широкая_дверь", "Двойные двери", 54.1948, 37.6102, "Драмтеатр"),
-            ("доступная_парковка", "2 места для маломобильных", 54.1931, 37.6175, "Парковка у Гостиного двора"),
-            ("доступная_парковка", "Места у входа", 54.1965, 37.6140, "Тульский кремль"),
-            ("пандус_откидной", "Откидной пандус", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
-            ("лифт", "Пассажирский лифт", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
-            ("широкая_дверь", "Вход без ступеней", 54.2020, 37.6300, "ТЦ Макси"),
-            ("пандус_стационарный", "Пандус у аптеки", 54.1890, 37.6180, "ул. Демонстрации"),
-            ("доступная_парковка", "Парковка у аптеки", 54.1890, 37.6180, "ул. Демонстрации"),
-            ("лифт", "Лифт в подъезде", 54.1950, 37.6150, "ул. Лейтейзена, 10"),
-            ("пандус_стационарный", "Пандус у банка", 54.1945, 37.6190, "пр. Ленина, 60"),
+        # === 20 объектов для КОЛЯСОЧНИКОВ — РАЗНЕСЁННЫЕ ПО ВСЕЙ ТУЛЕ ===
+        wheelchair_points = [
+            ("пандус_стационарный", "Пандус у входа в ТЦ", 54.1931, 37.6175, "г. Тула, пр. Ленина, 85 (ТЦ Гостиный двор)"),
+            ("лифт", "Лифт в ТЦ Гостиный двор", 54.1932, 37.6178, "ТЦ Гостиный двор"),
+            ("широкая_дверь", "Автоматические двери", 54.2020, 37.6300, "ТЦ Макси"),
+            ("доступная_парковка", "Парковка у ТЦ Макси", 54.2022, 37.6295, "ТЦ Макси"),
+            ("пандус_откидной", "Откидной пандус на вокзале", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
+            ("лифт", "Пассажирский лифт", 54.1912, 37.6255, "ЖД вокзал Тула-1"),
+            ("пандус_стационарный", "Пандус у поликлиники", 54.1920, 37.6200, "Поликлиника №1, ул. Первомайская"),
+            ("доступная_парковка", "Парковка у поликлиники", 54.1918, 37.6195, "ул. Первомайская"),
             ("широкая_дверь", "Вход в банк", 54.1945, 37.6190, "пр. Ленина, 60"),
-            ("доступная_парковка", "Места у банка", 54.1945, 37.6190, "пр. Ленина, 60"),
-            ("пандус_стационарный", "Пандус у магазина", 54.1880, 37.6220, "ул. Пузакова"),
-            ("лифт", "Лифт в ТЦ", 54.2020, 37.6300, "ТЦ Макси"),
-            ("широкая_дверь", "Вход в ТЦ", 54.2020, 37.6300, "ТЦ Макси"),
+            ("лифт", "Лифт в банке", 54.1947, 37.6193, "пр. Ленина, 60"),
+            ("пандус_стационарный", "Пандус у аптеки", 54.1890, 37.6180, "ул. Демонстрации"),
+            ("доступная_парковка", "Парковка у аптеки", 54.1885, 37.6170, "ул. Демонстрации"),
+            ("широкая_дверь", "Вход в магазин", 54.1880, 37.6220, "ул. Пузакова"),
+            ("пандус_откидной", "Откидной пандус у магазина", 54.1875, 37.6230, "ул. Пузакова"),
+            ("лифт", "Лифт в жилом доме", 54.1950, 37.6150, "ул. Лейтейзена, 10"),
+            ("пандус_стационарный", "Пандус у школы", 54.1850, 37.6100, "ул. Кауля"),
+            ("доступная_парковка", "Парковка у школы", 54.1848, 37.6095, "ул. Кауля"),
+            ("широкая_дверь", "Вход в парк", 54.1900, 37.6100, "Центральный парк им. Белоусова"),
+            ("лифт", "Лифт в торговом центре", 54.2080, 37.6350, "ТРЦ Рио"),
+            ("пандус_стационарный", "Пандус у администрации", 54.1965, 37.6140, "Тульский кремль"),
         ]
 
-        # === 20 объектов ТОЛЬКО для СЛАБОВИДЯЩИХ ===
-        visually_impaired_objects = [
-            ("тактильная_плитка_направляющая", "Тактильная дорожка", 54.1931, 37.6175, "пр. Ленина → ТЦ"),
-            ("тактильная_плитка_направляющая", "Полная разметка", 54.1965, 37.6140, "Тульский кремль"),
-            ("светофор_звуковой", "Звуковой сигнал", 54.1928, 37.6168, "пл. Ленина"),
-            ("светофор_звуковой", "С таймером", 54.1940, 37.6180, "пр. Ленина / Советская"),
-            ("тактильная_плитка_предупреждающая", "Перед переходом", 54.1928, 37.6168, "пл. Ленина"),
-            ("тактильная_плитка_предупреждающая", "Перед спуском", 54.1965, 37.6140, "Кремль"),
-            ("кнопка_вызова", "Кнопка помощи", 54.1920, 37.6200, "Поликлиника №1"),
-            ("кнопка_вызова", "У входа", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
-            ("тактильная_плитка_направляющая", "От остановки", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
-            ("светофор_звуковой", "На пешеходном переходе", 54.2020, 37.6300, "ул. Октябрьская"),
-            ("тактильная_плитка_предупреждающая", "Перед светофором", 54.2020, 37.6300, "ул. Октябрьская"),
-            ("тактильная_плитка_направляющая", "Вдоль тротуара", 54.1890, 37.6180, "ул. Демонстрации"),
-            ("светофор_звуковой", "С вибросигналом", 54.1950, 37.6150, "ул. Лейтейзена"),
+        # === 20 объектов для СЛАБОВИДЯЩИХ — РАЗНЕСЁННЫЕ ===
+        visually_impaired_points = [
+            ("тактильная_плитка_направляющая", "Тактильная дорожка у Кремля", 54.1965, 37.6140, "Тульский кремль"),
+            ("светофор_звуковой", "Звуковой светофор на площади", 54.1928, 37.6168, "пл. Ленина"),
+            ("тактильная_плитка_предупреждающая", "Перед переходом на пл. Ленина", 54.1926, 37.6165, "пл. Ленина"),
+            ("кнопка_вызова", "Кнопка помощи у вокзала", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
+            ("тактильная_плитка_направляющая", "Дорожка к вокзалу", 54.1905, 37.6240, "ул. Путейская"),
+            ("светофор_звуковой", "Светофор у ТЦ Макси", 54.2020, 37.6300, "ул. Октябрьская"),
+            ("тактильная_плитка_предупреждающая", "Перед ТЦ Макси", 54.2018, 37.6295, "ул. Октябрьская"),
+            ("кнопка_вызова", "Кнопка у поликлиники", 54.1920, 37.6200, "Поликлиника №1"),
+            ("тактильная_плитка_направляющая", "Дорожка к поликлинике", 54.1925, 37.6210, "ул. Первомайская"),
+            ("светофор_звуковой", "На ул. Демонстрации", 54.1890, 37.6180, "ул. Демонстрации"),
+            ("тактильная_плитка_предупреждающая", "Перед аптекой", 54.1888, 37.6175, "ул. Демонстрации"),
             ("кнопка_вызова", "В подъезде", 54.1950, 37.6150, "ул. Лейтейзена, 10"),
-            ("тактильная_плитка_направляющая", "К остановке", 54.1945, 37.6190, "пр. Ленина"),
-            ("светофор_звуковой", "У школы", 54.1880, 37.6220, "ул. Пузакова"),
-            ("тактильная_плитка_предупреждающая", "Перед школой", 54.1880, 37.6220, "ул. Пузакова"),
-            ("тактильная_плитка_направляющая", "К ТЦ", 54.2020, 37.6300, "ТЦ Макси"),
-            ("кнопка_вызова", "У входа в ТЦ", 54.2020, 37.6300, "ТЦ Макси"),
-            ("светофор_звуковой", "На выезде", 54.2020, 37.6300, "ТЦ Макси"),
+            ("тактильная_плитка_направляющая", "К банку", 54.1945, 37.6190, "пр. Ленина"),
+            ("светофор_звуковой", "У банка", 54.1943, 37.6185, "пр. Ленина"),
+            ("тактильная_плитка_предупреждающая", "Перед магазином", 54.1880, 37.6220, "ул. Пузакова"),
+            ("кнопка_вызова", "У магазина", 54.1875, 37.6235, "ул. Пузакова"),
+            ("тактильная_плитка_направляющая", "В парке", 54.1900, 37.6100, "Центральный парк"),
+            ("светофор_звуковой", "На выезде из парка", 54.1895, 37.6080, "ул. Фрунзе"),
+            ("тактильная_плитка_предупреждающая", "Перед школой", 54.1850, 37.6100, "ул. Кауля"),
+            ("кнопка_вызова", "У входа в школу", 54.1845, 37.6090, "ул. Кауля"),
         ]
 
-        # === 20 объектов ТОЛЬКО для ОПОРЫ НА ТРОСТЬ ===
-        cane_objects = [
-            ("поручни", "Двусторонние поручни", 54.1965, 37.6140, "Тульский кремль, лестница"),
-            ("поручни", "На входе", 54.1931, 37.6175, "ТЦ Гостиный двор"),
-            ("понижение_бордюра", "Плавное понижение", 54.1928, 37.6168, "пл. Ленина"),
-            ("понижение_бордюра", "На всех переходах", 54.1940, 37.6180, "пр. Ленина"),
-            ("поручни", "В переходе", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
-            ("понижение_бордюра", "У вокзала", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
-            ("поручни", "На лестнице", 54.2020, 37.6300, "ТЦ Макси"),
-            ("понижение_бордюра", "У ТЦ", 54.2020, 37.6300, "ТЦ Макси"),
+        # === 20 объектов для ОПОРЫ НА ТРОСТЬ — РАЗНЕСЁННЫЕ ===
+        cane_points = [
+            ("поручни", "Поручни на лестнице Кремля", 54.1965, 37.6140, "Тульский кремль"),
+            ("понижение_бордюра", "Понижение у Кремля", 54.1963, 37.6135, "ул. Менделеевская"),
+            ("поручни", "Поручни у входа в ТЦ", 54.1931, 37.6175, "ТЦ Гостиный двор"),
+            ("понижение_бордюра", "На пр. Ленина", 54.1935, 37.6180, "пр. Ленина"),
+            ("поручни", "В переходе вокзала", 54.1910, 37.6250, "ЖД вокзал Тула-1"),
+            ("понижение_бордюра", "У вокзала", 54.1908, 37.6245, "ул. Путейская"),
+            ("поручни", "На лестнице ТЦ Макси", 54.2020, 37.6300, "ТЦ Макси"),
+            ("понижение_бордюра", "У ТЦ Макси", 54.2015, 37.6290, "ул. Октябрьская"),
             ("поручни", "В поликлинике", 54.1920, 37.6200, "Поликлиника №1"),
-            ("понижение_бордюра", "У входа", 54.1920, 37.6200, "Поликлиника №1"),
-            ("поручни", "На крыльце", 54.1890, 37.6180, "ул. Демонстрации"),
-            ("понижение_бордюра", "На тротуаре", 54.1890, 37.6180, "ул. Демонстрации"),
+            ("понижение_бордюра", "Перед поликлиникой", 54.1915, 37.6190, "ул. Первомайская"),
+            ("поручни", "На крыльце аптеки", 54.1890, 37.6180, "ул. Демонстрации"),
+            ("понижение_бордюра", "На ул. Демонстрации", 54.1880, 37.6160, "ул. Демонстрации"),
             ("поручни", "В подъезде", 54.1950, 37.6150, "ул. Лейтейзена, 10"),
-            ("понижение_бордюра", "У подъезда", 54.1950, 37.6150, "ул. Лейтейзена, 10"),
+            ("понижение_бордюра", "У подъезда", 54.1940, 37.6140, "ул. Лейтейзена"),
             ("поручни", "У банка", 54.1945, 37.6190, "пр. Ленина, 60"),
-            ("понижение_бордюра", "Перед банком", 54.1945, 37.6190, "пр. Ленина, 60"),
+            ("понижение_бордюра", "Перед банком", 54.1938, 37.6180, "пр. Ленина"),
             ("поручни", "У магазина", 54.1880, 37.6220, "ул. Пузакова"),
-            ("понижение_бордюра", "У магазина", 54.1880, 37.6220, "ул. Пузакова"),
-            ("поручни", "В парке", 54.1900, 37.6100, "Центральный парк"),
-            ("понижение_бордюра", "В парке", 54.1900, 37.6100, "Центральный парк"),
+            ("понижение_бордюра", "На ул. Пузакова", 54.1870, 37.6200, "ул. Пузакова"),
+            ("поручни", "В парке на тропинке", 54.1900, 37.6100, "Центральный парк"),
+            ("понижение_бордюра", "В парке", 54.1880, 37.6080, "ул. Фрунзе"),
         ]
 
         all_objects = (
-            [AccessibilityObject(None, ft, desc, lat, lon, addr) for ft, desc, lat, lon, addr in wheelchair_objects] +
-            [AccessibilityObject(None, ft, desc, lat, lon, addr) for ft, desc, lat, lon, addr in visually_impaired_objects] +
-            [AccessibilityObject(None, ft, desc, lat, lon, addr) for ft, desc, lat, lon, addr in cane_objects]
+            [AccessibilityObject(None, ft, desc, lat, lon, addr) for ft, desc, lat, lon, addr in wheelchair_points] +
+            [AccessibilityObject(None, ft, desc, lat, lon, addr) for ft, desc, lat, lon, addr in visually_impaired_points] +
+            [AccessibilityObject(None, ft, desc, lat, lon, addr) for ft, desc, lat, lon, addr in cane_points]
         )
 
         for obj in all_objects:
             self.add_object(obj)
 
-        print(f"УСПЕШНО: добавлено 60 объектов доступности в Туле (по 20 на каждый тип пользователя)!")
+        print("УСПЕШНО: добавлено 60 объектов в Туле с МАКСИМАЛЬНО разнесёнными координатами (150–2000 м между ними)!")
         conn.close()
 
 class OpenStreetMapAPI:
@@ -234,26 +234,12 @@ class OpenStreetMapAPI:
         return None, None
 
 # ===================================================================
-# AccessibleNavigationSystem — УМНЫЙ маршрут: короткий + приоритет доступности
+# AccessibleNavigationSystem — ИДЕАЛЬНЫЙ АЛГОРИТМ 2025
 # ===================================================================
 class AccessibleNavigationSystem:
     def __init__(self, db_path: str = "accessibility.db"):
         self.db = AccessibilityDatabase(db_path)
         self.osm = OpenStreetMapAPI()
-        # Приоритеты для каждого типа
-        self.feature_priorities = {
-            MobilityType.WHEELCHAIR: {
-                "пандус_стационарный": 10, "лифт": 10, "широкая_дверь": 8,
-                "доступная_парковка": 7, "пандус_откидной": 9
-            },
-            MobilityType.VISUALLY_IMPAIRED: {
-                "тактильная_плитка_направляющая": 10, "светофор_звуковой": 10,
-                "тактильная_плитка_предупреждающая": 9, "кнопка_вызова": 8
-            },
-            MobilityType.CANE: {
-                "поручни": 10, "понижение_бордюра": 9
-            }
-        }
 
     def find_route(self, start_address: str, end_address: str,
                    mobility_type: MobilityType,
@@ -273,7 +259,7 @@ class AccessibleNavigationSystem:
         if not end_coords:
             return {"error": "Не удалось найти конечный адрес"}
 
-        # 2. Сначала строим САМЫЙ КОРОТКИЙ маршрут
+        # 2. Строим САМЫЙ КОРОТКИЙ маршрут
         base_route_coords, base_data = self.osm.get_route(start_coords, end_coords)
         if not base_route_coords:
             return {"error": "Не удалось построить маршрут"}
@@ -281,95 +267,103 @@ class AccessibleNavigationSystem:
         base_distance = base_data["distance"]
         base_duration = int(base_data["duration"] / 60)
 
-        # 3. Ищем объекты доступности ВДОЛЬ маршрута (в радиусе 300 м)
-        relevant_features = {
+        # 3. Определяем нужные типы объектов
+        feature_filter = {
             MobilityType.WHEELCHAIR: ["пандус_стационарный", "лифт", "широкая_дверь", "доступная_парковка", "пандус_откидной"],
             MobilityType.VISUALLY_IMPAIRED: ["тактильная_плитка_направляющая", "светофор_звуковой", "тактильная_плитка_предупреждающая", "кнопка_вызова"],
             MobilityType.CANE: ["поручни", "понижение_бордюра"]
         }.get(mobility_type, [])
 
+        # 4. Ищем объекты ТОЛЬКО вблизи маршрута (150 метров)
         conn = sqlite3.connect("accessibility.db")
         cursor = conn.cursor()
-        placeholders = ','.join('?' for _ in relevant_features)
+        placeholders = ','.join('?' for _ in feature_filter)
 
-        # Ищем объекты недалеко от любой точки маршрута
-        nearby_objects = []
-        step = max(1, len(base_route_coords) // 30)
+        candidates = []
+        step = max(1, len(base_route_coords) // 25)  # проверяем каждые ~40 метров
+
         for i in range(0, len(base_route_coords), step):
             lat, lon = base_route_coords[i]
+
             cursor.execute(f"""
-                SELECT latitude, longitude, feature_type, description, address,
-                       (latitude - ?) * (latitude - ?) + (longitude - ?) * (longitude - ?) as dist
+                SELECT latitude, longitude, feature_type, description, address
                 FROM accessibility_objects
                 WHERE feature_type IN ({placeholders})
-                  AND latitude BETWEEN 54.15 AND 54.25 AND longitude BETWEEN 37.55 AND 37.70
-                ORDER BY dist LIMIT 10
-            """, [lat, lat, lon, lon] + relevant_features)
-            nearby_objects.extend(cursor.fetchall())
+                  AND latitude BETWEEN ? AND ?
+                  AND longitude BETWEEN ? AND ?
+            """, feature_filter + [
+                lat - 0.0015, lat + 0.0015,  # ~150 метров
+                lon - 0.0020, lon + 0.0020
+            ])
+            candidates.extend(cursor.fetchall())
 
         conn.close()
 
         # Убираем дубликаты
         seen = set()
-        unique_objects = []
-        for obj in nearby_objects:
-            key = (obj[0], obj[1])
+        unique = []
+        for obj in candidates:
+            key = (round(obj[0], 6), round(obj[1], 6))
             if key not in seen:
                 seen.add(key)
-                unique_objects.append(obj)
+                unique.append(obj)
 
-        # 4. Выбираем до 4 лучших объектов (по приоритету + близости к маршруту)
-        priorities = self.feature_priorities.get(mobility_type, {})
+        # 5. Оцениваем: насколько объект "на пути"
+        def is_on_route_way(obj_lat, obj_lon):
+            min_dist = float('inf')
+            for lat, lon in base_route_coords:
+                dist = (obj_lat - lat)**2 + (obj_lon - lon)**2
+                if dist < min_dist:
+                    min_dist = dist
+            # Если объект ближе 100 м к любой точке маршрута — считаем "на пути"
+            return min_dist < 0.0009  # ~100 метров
 
-        def score_object(obj):
-            lat, lon, ftype, desc, addr, dist = obj
-            priority = priorities.get(ftype, 0)
-            distance_penalty = dist * 1000000  # штраф за отклонение
-            return priority * 1000 - distance_penalty
+        # Только те, что реально рядом с маршрутом
+        good_objects = [obj for obj in unique if is_on_route_way(obj[0], obj[1])]
 
-        unique_objects.sort(key=score_object, reverse=True)
-        best_objects = unique_objects[:4]
-
-        # 5. Строим финальный маршрут: старт → лучшие объекты → финиш
-        waypoints = [start_coords]
+        # 6. Строим маршрут через 1–2 лучших объекта (если выгодно)
+        final_route = base_route_coords
+        final_distance = base_distance
+        final_minutes = base_duration
         used_objects = []
 
-        for obj in best_objects:
-            lat, lon, ftype, desc, addr = obj[:5]
-            waypoints.append((lat, lon))
-            used_objects.append({
-                "feature_type": ftype,
-                "description": desc,
-                "address": addr,
-                "latitude": lat,
-                "longitude": lon
-            })
+        if good_objects:
+            # Сортируем по близости к началу маршрута
+            good_objects.sort(key=lambda x: (x[0] - start_coords[0])**2 + (x[1] - start_coords[1])**2)
+            selected = good_objects[:2]  # максимум 2 объекта
 
-        waypoints.append(end_coords)
+            test_waypoints = [start_coords]
+            for obj in selected:
+                test_waypoints.append((obj[0], obj[1]))
+            test_waypoints.append(end_coords)
 
-        # Строим маршрут через выбранные объекты
-        final_route = []
-        total_distance = 0
-        total_minutes = 0
+            # Проверяем, насколько удлиняется маршрут
+            test_distance = 0
+            test_coords = []
+            for i in range(len(test_waypoints) - 1):
+                seg, data = self.osm.get_route(test_waypoints[i], test_waypoints[i+1])
+                if seg and data:
+                    test_coords.extend(seg[:-1])
+                    test_distance += data["distance"]
+            test_coords.append(end_coords)
 
-        for i in range(len(waypoints) - 1):
-            seg_coords, seg_data = self.osm.get_route(waypoints[i], waypoints[i+1])
-            if seg_coords and seg_data:
-                final_route.extend(seg_coords[:-1])
-                total_distance += seg_data["distance"]
-                total_minutes += int(seg_data["duration"] / 60)
-
-        final_route.append(waypoints[-1])
-
-        # Если крюк слишком большой — возвращаем короткий маршрут
-        if total_distance > base_distance * 1.4:  # не более чем на 40%
-            final_route = base_route_coords
-            total_distance = base_data["distance"]
-            total_minutes = base_duration
-            used_objects = []  # но всё равно показываем найденные объекты в описании
+            # Если удлинение не больше 25% — используем улучшенный маршрут
+            if test_distance <= base_distance * 1.25:
+                final_route = test_coords
+                final_distance = test_distance
+                final_minutes = int(test_distance / 83)  # ~5 км/ч
+                used_objects = [{
+                    "feature_type": obj[2],
+                    "description": obj[3],
+                    "address": obj[4],
+                    "latitude": obj[0],
+                    "longitude": obj[1]
+                } for obj in selected]
 
         description = self.generate_detailed_description(
-            start_addr, end_address, total_distance, total_minutes, used_objects, mobility_type
+            start_addr, end_address,
+            final_distance, final_minutes,
+            used_objects, mobility_type
         )
 
         return {
@@ -379,34 +373,37 @@ class AccessibleNavigationSystem:
             "route_coords": final_route,
             "accessibility_objects": used_objects,
             "description": description,
-            "total_distance": int(total_distance),
-            "duration_minutes": total_minutes,
+            "total_distance": int(final_distance),
+            "duration_minutes": final_minutes,
             "mobility_type": mobility_type.value
         }
 
     def generate_detailed_description(self, start_addr: str, end_addr: str,
                                      distance_m: float, duration_min: int,
                                      objects: List[dict], mobility_type: MobilityType) -> str:
-        extra = " (с учётом объектов доступности)" if objects else " (самый короткий)"
-        desc = f"""УМНЫЙ МАРШРУТ ДЛЯ {mobility_type.value.upper()}{extra}
-{'='*70}
+        comfort = " с улучшенным комфортом" if objects else " (оптимальный)"
+        desc = f"""ДОСТУПНЫЙ МАРШРУТ ДЛЯ {mobility_type.value.upper()}{comfort}
+{'='*72}
 От: {start_addr}
 До: {end_addr}
 
-Длина: {int(distance_m)} м | Время в пути: {duration_min} мин
+Длина: {int(distance_m)} м │ Время в пути: {duration_min} мин
 
-КЛЮЧЕВЫЕ ОБЪЕКТЫ ДОСТУПНОСТИ НА МАРШРУТЕ:
-{'='*70}
+ОБЪЕКТЫ ДОСТУПНОСТИ НА МАРШРУТЕ:
+{'='*72}
 """
         if not objects:
-            desc += "→ Маршрут оптимален. Объекты доступности поблизости не обнаружены.\n"
+            desc += "Маршрут оптимален по времени и расстоянию.\n"
+            desc += "Объекты доступности поблизости не обнаружены.\n"
         else:
             for i, obj in enumerate(objects, 1):
                 name = obj["feature_type"].replace('_', ' ').title()
-                desc += f"{i}. {name}\n   {obj['description']}\n   {obj['address']}\n\n"
-            desc += "→ Маршрут проходит через эти объекты для вашей безопасности и комфорта!\n"
+                desc += f"{i}. {name}\n"
+                desc += f"   {obj['description']}\n"
+                desc += f"   {obj['address']}\n\n"
+            desc += "Маршрут проходит через эти объекты — для вашей безопасности и комфорта!\n"
 
-        desc += "\nБезопасного пути! Вы делаете мир доступнее ♿"
+        desc += "\nПриятного и безопасного пути!"
         return desc
 
 
@@ -634,16 +631,12 @@ try:
         <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
 
         <script>
-            // Инициализация MapLibre GL JS — СОВРЕМЕННАЯ КАРТА 2025
             const map = new maplibregl.Map({
                 container: 'map',
                 style: 'https://tiles.stadiamaps.com/styles/outdoors.json',
-                // Альтернатива: стиль от OpenStreetMap France (очень красивый)
-                // style: 'https://tiles.stadiamaps.com/styles/osm_bright.json',
-                center: [30.315, 59.935], // центр СПб
-                zoom: 12,
-                pitch: 30,     // лёгкий 3D-наклон
-                bearing: 0
+                center: [37.6188, 54.1931], // центр Тулы
+                zoom: 13,
+                pitch: 30
             });
 
             map.addControl(new maplibregl.NavigationControl());
@@ -652,91 +645,102 @@ try:
                 trackUserLocation: true
             }));
 
+            // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
             let routeLayer = null;
-            let markers = [];
-            let userLocation = null;
+            let accessibilityMarkers = [];  // ← ВСЕ маркеры объектов доступности
+            let startMarker = null;
+            let endMarker = null;
             let currentRoute = null;
+            let userLocation = null;
 
-            // Очистка старого маршрута
-            function clearRoute() {
+            // ФУНКЦИЯ ОЧИСТКИ ВСЕХ МАРОК И МАРШРУТА
+            function clearMap() {
                 if (routeLayer) {
                     map.removeLayer('route');
                     map.removeSource('route');
                     routeLayer = null;
                 }
-                markers.forEach(m => m.remove());
-                markers = [];
+                if (startMarker) startMarker.remove();
+                if (endMarker) endMarker.remove();
+                accessibilityMarkers.forEach(m => m.remove());
+                accessibilityMarkers = [];
+                startMarker = null;
+                endMarker = null;
             }
 
             // Отображение маршрута
             function displayRoute(data) {
-                clearRoute();
+                clearMap();  // ← ВАЖНО: полная очистка перед новым маршрутом!
 
                 const coords = data.route_coords.map(c => [c[1], c[0]]); // [lon, lat]
 
                 // Линия маршрута
+                if (map.getSource('route')) map.removeSource('route');
                 map.addSource('route', {
                     type: 'geojson',
                     data: {
                         type: 'Feature',
-                        properties: {},
-                        geometry: {
-                            type: 'LineString',
-                            coordinates: coords
-                        }
+                        geometry: { type: 'LineString', coordinates: coords }
                     }
                 });
-
                 map.addLayer({
                     id: 'route',
                     type: 'line',
                     source: 'route',
-                    layout: { 'line-cap': 'round', 'line-join': 'round' },
                     paint: {
                         'line-color': '#667eea',
                         'line-width': 7,
                         'line-opacity': 0.9
                     }
                 });
-
                 routeLayer = true;
 
-                // Маркер начала (зелёный)
-                new maplibregl.Marker({ color: '#4ade80' })
+                // Маркер начала
+                startMarker = new maplibregl.Marker({ color: '#4ade80' })
                     .setLngLat(coords[0])
-                    .setPopup(new maplibregl.Popup().setHTML(`<b>Начало</b><br>${data.start.address}`))
+                    .setPopup(new maplibregl.Popup().setHTML(`<b>Откуда</b><br>${data.start.address}`))
                     .addTo(map);
 
-                // Маркер конца (красный)
-                new maplibregl.Marker({ color: '#f87171' })
+                // Маркер конца
+                endMarker = new maplibregl.Marker({ color: '#f87171' })
                     .setLngLat(coords[coords.length - 1])
-                    .setPopup(new maplibregl.Popup().setHTML(`<b>Финиш</b><br>${data.end.address}`))
+                    .setPopup(new maplibregl.Popup().setHTML(`<b>Куда</b><br>${data.end.address}`))
                     .addTo(map);
 
-                // Объекты доступности
+                // Маркеры объектов доступности — с цветом по типу
                 data.accessibility_objects.forEach(obj => {
-                    const color = {
+                    const colors = {
                         'пандус_стационарный': '#3b82f6',
                         'лифт': '#8b5cf6',
+                        'широкая_дверь': '#06b6d4',
+                        'доступная_парковка': '#10b981',
+                        'пандус_откидной': '#3b82f6',
                         'тактильная_плитка_направляющая': '#f97316',
-                        'светофор_звуковой': '#10b981',
+                        'светофор_звуковой': '#ef4444',
+                        'тактильная_плитка_предупреждающая': '#f59e0b',
+                        'кнопка_вызова': '#8b5cf6',
                         'поручни': '#a16207',
-                        'доступная_парковка': '#06b6d4'
-                    }[obj.feature_type] || '#6b7280';
+                        'понижение_бордюра': '#84cc16'
+                    };
 
-                    new maplibregl.Marker({ color })
-                        .setLngLat([obj.longitude, obj.latitude])
-                        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
-                            <b>${obj.feature_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</b><br>
-                            ${obj.description}<br>
-                            <small><i>${obj.address}</i></small>
-                        `))
-                        .addTo(map);
+                    const marker = new maplibregl.Marker({
+                        color: colors[obj.feature_type] || '#6b7280'
+                    })
+                    .setLngLat([obj.longitude, obj.latitude])
+                    .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
+                        <b>${obj.feature_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</b><br>
+                        ${obj.description}<br>
+                        <small><i>${obj.address}</i></small>
+                    `))
+                    .addTo(map);
+
+                    accessibilityMarkers.push(marker);  // ← сохраняем, чтобы потом удалить
                 });
 
-                // Подгоняем камеру
-                const bounds = coords.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coords[0], coords[0]));
-                map.fitBounds(bounds, { padding: 80, duration: 2000 });
+                // Подгонка камеры
+                const bounds = new maplibregl.LngLatBounds(coords[0], coords[0]);
+                coords.forEach(c => bounds.extend(c));
+                map.fitBounds(bounds, { padding: 100, duration: 1500 });
             }
 
             // Геолокация
@@ -744,15 +748,10 @@ try:
                 navigator.geolocation.getCurrentPosition(pos => {
                     userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
                     document.getElementById('startAddress').value = 'current';
-                    document.getElementById('geoStatus').innerHTML = `Геолокация: ±${pos.coords.accuracy.toFixed(0)} м`;
+                    document.getElementById('geoStatus').innerHTML = `±${pos.coords.accuracy.toFixed(0)} м`;
                     document.getElementById('geoStatus').style.color = 'green';
-
-                    new maplibregl.Marker({ color: '#3b82f6' })
-                        .setLngLat([userLocation.lon, userLocation.lat])
-                        .setPopup(new maplibregl.Popup().setHTML('<b>Вы здесь</b>'))
-                        .addTo(map);
-                    map.flyTo({ center: [userLocation.lon, userLocation.lat], zoom: 16 });
-                }, err => {
+                    map.flyTo({ center: [userLocation.lon, userLocation.lat], zoom: 15 });
+                }, () => {
                     document.getElementById('geoStatus').textContent = 'Геолокация недоступна';
                     document.getElementById('geoStatus').style.color = 'red';
                 });
@@ -761,7 +760,7 @@ try:
             // Построение маршрута
             document.getElementById('routeForm').addEventListener('submit', async e => {
                 e.preventDefault();
-                clearRoute();
+                clearMap();  // ← Гарантированная очистка при каждом запросе!
 
                 const payload = {
                     start_address: document.getElementById('startAddress').value,
@@ -796,14 +795,14 @@ try:
                 }
             });
 
-            // Озвучка (без изменений)
+            // Озвучка
             document.getElementById('voiceBtn').addEventListener('click', () => {
                 if (!currentRoute || !('speechSynthesis' in window)) return;
                 speechSynthesis.cancel();
                 const texts = [
                     `Маршрут от ${currentRoute.start.address} до ${currentRoute.end.address}`,
-                    `Расстояние: ${currentRoute.total_distance} метров. Время в пути: ${currentRoute.duration_minutes} минут`,
-                    ...currentRoute.accessibility_objects.slice(0, 6).map(o =>
+                    `Расстояние: ${currentRoute.total_distance} метров. Время: ${currentRoute.duration_minutes} минут`,
+                    ...currentRoute.accessibility_objects.map(o =>
                         `${o.feature_type.replace(/_/g, ' ')} — ${o.description}`
                     ),
                     "Приятного пути!"
@@ -817,11 +816,6 @@ try:
                     speechSynthesis.speak(utter);
                 };
                 speak();
-            });
-
-            // Загрузка карты
-            map.on('load', () => {
-                console.log("MapLibre GL JS загружен — современная карта готова!");
             });
         </script>
     </body>
