@@ -369,7 +369,7 @@ class AccessibleNavigationSystem:
             used_objects = []  # но всё равно показываем найденные объекты в описании
 
         description = self.generate_detailed_description(
-            start_addr, end_address, total_distance, total_minutes, used_objects, mobility_type
+            start_addr, end_address, total_distance, total_minutes, used_objects, mobility_type, final_route
         )
 
         return {
@@ -385,39 +385,119 @@ class AccessibleNavigationSystem:
         }
 
     def generate_detailed_description(self, start_addr: str, end_addr: str,
-                                     distance_m: float, duration_min: int,
-                                     objects: List[dict], mobility_type: MobilityType) -> str:
-        extra = " (с учётом объектов доступности)" if objects else " (самый короткий)"
-        desc = f"""УМНЫЙ МАРШРУТ ДЛЯ {mobility_type.value.upper()}{extra}
-{'='*70}
-От: {start_addr}
-До: {end_addr}
+                                      distance_m: float, duration_min: int,
+                                      objects: List[dict], mobility_type: MobilityType,
+                                      route_coords: List[Tuple[float, float]]) -> str:
+        desc = f"""МАРШРУТ ОТ: {start_addr}
+ДО: {end_addr}
 
-Длина: {int(distance_m)} м | Время в пути: {duration_min} мин
+Общая длина маршрута: {int(distance_m)} метров. Примерное время в пути: {duration_min} минут.
 
-КЛЮЧЕВЫЕ ОБЪЕКТЫ ДОСТУПНОСТИ НА МАРШРУТЕ:
-{'='*70}
+Детализация маршрута по шагам:
 """
-        if not objects:
-            desc += "→ Маршрут оптимален. Объекты доступности поблизости не обнаружены.\n"
-        else:
-            for i, obj in enumerate(objects, 1):
-                name = obj["feature_type"].replace('_', ' ').title()
-                desc += f"{i}. {name}\n   {obj['description']}\n   {obj['address']}\n\n"
-            desc += "→ Маршрут проходит через эти объекты для вашей безопасности и комфорта!\n"
 
-        desc += "\nБезопасного пути! Вы делаете мир доступнее ♿"
+        # Generate step-by-step description
+        steps = self._generate_route_steps(start_addr, end_addr, objects, route_coords, mobility_type)
+
+        for step in steps:
+            desc += f"\n{step}\n"
+
+        desc += "\nВаш маршрут завершен."
         return desc
+
+    def _generate_route_steps(self, start_addr: str, end_addr: str,
+                             objects: List[dict], route_coords: List[Tuple[float, float]],
+                             mobility_type: MobilityType) -> List[str]:
+        steps = []
+
+        # Starting point
+        steps.append("Начало движения от: " + start_addr)
+        steps.append("Описание: Выход из начальной точки. Обратите внимание на доступные элементы.")
+
+        current_pos = 0
+
+        # Process accessibility objects in order
+        for i, obj in enumerate(objects):
+            feature_type = obj["feature_type"]
+            feature_name = self._get_feature_description(feature_type)
+
+            if feature_type in ["пандус_откидной", "пандус_стационарный"]:
+                steps.append(f"Описание: Подход к пандусу. {obj['description']}")
+                steps.append(f"Тип объекта доступности: {feature_name}")
+            elif feature_type in ["тактильная_плитка_направляющая", "тактильная_плитка_предупреждающая"]:
+                steps.append(f"Описание: Движение по тротуару. {obj['description']}")
+                steps.append(f"Тип объекта доступности: {feature_name}")
+            elif feature_type == "понижение_бордюра":
+                steps.append(f"Описание: Подход к переходу. {obj['description']}")
+                steps.append(f"Тип объекта доступности: {feature_name}")
+            elif feature_type == "светофор_звуковой":
+                steps.append(f"Описание: Переход через дорогу. {obj['description']}")
+                steps.append(f"Тип объекта доступности: {feature_name}")
+            elif feature_type == "широкая_дверь":
+                steps.append(f"Описание: Подход к входу. {obj['description']}")
+                steps.append(f"Тип объекта доступности: {feature_name}")
+            elif feature_type == "кнопка_вызова":
+                steps.append(f"Описание: Доступна помощь. {obj['description']}")
+                steps.append(f"Тип объекта доступности: {feature_name}")
+            else:
+                steps.append(f"Описание: {obj['description']}")
+                steps.append(f"Тип объекта доступности: {feature_name}")
+
+            # Movement to next point
+            if i < len(objects) - 1:
+                next_obj = objects[i+1]
+                distance = self._calculate_distance(obj, next_obj)
+                steps.append(f"Движение к следующему объекту ({int(distance)} м): {next_obj['address']}")
+            else:
+                steps.append(f"Движение к конечной точке: {end_addr}")
+
+        # Final approach
+        steps.append(f"Подход к: {end_addr}")
+        steps.append("Описание: Вы достигли места назначения.")
+
+        return steps
+
+    def _calculate_distance(self, obj1: dict, obj2: dict) -> float:
+        """Calculate approximate distance between two objects in meters"""
+        lat1, lon1 = obj1["latitude"], obj1["longitude"]
+        lat2, lon2 = obj2["latitude"], obj2["longitude"]
+
+        # Haversine formula approximation
+        dlat = (lat2 - lat1) * 111000  # ~111km per degree latitude
+        dlon = (lon2 - lon1) * 111000 * math.cos(math.radians((lat1 + lat2) / 2))
+        return math.sqrt(dlat**2 + dlon**2)
+
+    def _get_feature_description(self, feature_type: str) -> str:
+        descriptions = {
+            "пандус_откидной": "Пандус (откидной)",
+            "пандус_стационарный": "Пандус (стационарный)",
+            "тактильная_плитка_направляющая": "Тактильная плитка (направляющая)",
+            "тактильная_плитка_предупреждающая": "Тактильная плитка (предупреждающая)",
+            "понижение_бордюра": "Понижение бордюра",
+            "светофор_звуковой": "Светофор со звуковым сигналом",
+            "широкая_дверь": "Широкая дверь",
+            "кнопка_вызова": "Кнопка вызова помощи",
+            "поручни": "Поручни",
+            "лифт": "Лифт",
+            "доступная_парковка": "Доступная парковка"
+        }
+        return descriptions.get(feature_type, feature_type.replace('_', ' ').title())
 
 
 # Flask веб-приложение
 try:
     from flask import Flask, render_template_string, request, jsonify
     from flask_cors import CORS
-    
+    from xml_parser import XMLDataParser
+
     app = Flask(__name__)
     CORS(app)
     nav_system = AccessibleNavigationSystem()
+
+    # Load organizations
+    parser = XMLDataParser()
+    parser.parse_organizations_xml("../xml/Файл_соцподдержка_1.xml")
+    organizations = parser.social_organizations
     
     HTML_TEMPLATE = """
     <!DOCTYPE html>
@@ -588,7 +668,8 @@ try:
                             <label for="endAddress">
                                 <span class="icon">🎯</span>Куда
                             </label>
-                            <input type="text" id="endAddress" placeholder="Введите адрес назначения" required>
+                            <input type="text" id="endAddress" list="destinations" placeholder="Введите адрес или выберите организацию" required>
+                            <datalist id="destinations"></datalist>
                         </div>
                         
                         <div class="form-group">
@@ -822,7 +903,24 @@ try:
             // Загрузка карты
             map.on('load', () => {
                 console.log("MapLibre GL JS загружен — современная карта готова!");
+                loadDestinations();
             });
+
+            // Загрузка списка организаций
+            async function loadDestinations() {
+                try {
+                    const res = await fetch('/api/organizations');
+                    const orgs = await res.json();
+                    const datalist = document.getElementById('destinations');
+                    orgs.forEach(org => {
+                        const option = document.createElement('option');
+                        option.value = org.name + ', ' + org.address;
+                        datalist.appendChild(option);
+                    });
+                } catch (err) {
+                    console.error('Failed to load destinations:', err);
+                }
+            }
         </script>
     </body>
     </html>
@@ -831,6 +929,12 @@ try:
     @app.route('/')
     def index():
         return render_template_string(HTML_TEMPLATE)
+
+    @app.route('/api/organizations')
+    def api_organizations():
+        # Return list of organizations for destination selection
+        orgs = [{"name": org.name, "address": org.address, "categories": org.served_disability_categories} for org in organizations[:50]]  # Limit to 50 for UI
+        return jsonify(orgs)
 
     @app.route('/api/route', methods=['POST'])
     def api_route():
