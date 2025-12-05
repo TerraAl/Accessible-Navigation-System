@@ -311,25 +311,35 @@ class AccessibleNavigationSystem:
         }
 
     def find_route(self, start_address: str, end_address: str,
-                   mobility_type: MobilityType,
-                   user_location: Optional[Tuple[float, float]] = None) -> Dict:
+                    mobility_type: MobilityType,
+                    user_location: Optional[Tuple[float, float]] = None,
+                    start_coords: Optional[Tuple[float, float]] = None,
+                    end_coords: Optional[Tuple[float, float]] = None) -> Dict:
 
         # 1. Геокодирование
-        if start_address.lower() == "current" and user_location:
-            start_coords = user_location
+        if start_coords:
+            start_coords_tuple = start_coords
+            start_addr = "Выбранное место на карте"
+        elif start_address.lower() == "current" and user_location:
+            start_coords_tuple = user_location
             start_addr = "Текущее местоположение"
         else:
-            start_coords = self.osm.geocode(start_address)
-            if not start_coords:
+            start_coords_tuple = self.osm.geocode(start_address)
+            if not start_coords_tuple:
                 return {"error": "Не удалось найти начальный адрес"}
             start_addr = start_address
 
-        end_coords = self.osm.geocode(end_address)
-        if not end_coords:
-            return {"error": "Не удалось найти конечный адрес"}
+        if end_coords:
+            end_coords_tuple = end_coords
+            end_addr = "Выбранное место на карте"
+        else:
+            end_coords_tuple = self.osm.geocode(end_address)
+            if not end_coords_tuple:
+                return {"error": "Не удалось найти конечный адрес"}
+            end_addr = end_address
 
         # 2. Сначала строим САМЫЙ КОРОТКИЙ маршрут
-        base_route_coords, base_data = self.osm.get_route(start_coords, end_coords)
+        base_route_coords, base_data = self.osm.get_route(start_coords_tuple, end_coords_tuple)
         if not base_route_coords:
             return {"error": "Не удалось построить маршрут"}
 
@@ -386,7 +396,7 @@ class AccessibleNavigationSystem:
         best_objects = unique_objects[:4]
 
         # 5. Строим финальный маршрут: старт → лучшие объекты → финиш
-        waypoints = [start_coords]
+        waypoints = [start_coords_tuple]
         used_objects = []
 
         for obj in best_objects:
@@ -400,7 +410,7 @@ class AccessibleNavigationSystem:
                 "longitude": lon
             })
 
-        waypoints.append(end_coords)
+        waypoints.append(end_coords_tuple)
 
         # Строим маршрут через выбранные объекты
         final_route = []
@@ -429,8 +439,8 @@ class AccessibleNavigationSystem:
 
         return {
             "success": True,
-            "start": {"address": start_addr, "coords": start_coords},
-            "end": {"address": end_address, "coords": end_coords},
+            "start": {"address": start_addr, "coords": start_coords_tuple},
+            "end": {"address": end_addr, "coords": end_coords_tuple},
             "route_coords": final_route,
             "accessibility_objects": used_objects,
             "description": description,
@@ -525,6 +535,40 @@ try:
             .header p { font-size: 1.2em; opacity: 0.9; }
             .header .links { margin-top: 20px; }
             .header .links a { color: white; margin: 0 10px; text-decoration: none; }
+            .accessibility-buttons { margin-top: 20px; }
+            .btn-accessibility {
+                background: rgba(255,255,255,0.2);
+                color: white;
+                border: 1px solid white;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 0.9em;
+                cursor: pointer;
+                margin: 0 5px;
+                transition: all 0.3s;
+            }
+            .btn-accessibility:hover {
+                background: rgba(255,255,255,0.3);
+            }
+            .high-contrast {
+                background: #000 !important;
+                color: #fff !important;
+            }
+            .high-contrast .sidebar {
+                background: #111 !important;
+            }
+            .high-contrast .form-group label {
+                color: #fff !important;
+            }
+            .high-contrast input, .high-contrast select {
+                background: #333 !important;
+                color: #fff !important;
+                border-color: #fff !important;
+            }
+            .high-contrast .btn {
+                background: #fff !important;
+                color: #000 !important;
+            }
             .content {
                 display: grid;
                 grid-template-columns: 400px 1fr;
@@ -557,7 +601,7 @@ try:
                 border-color: #667eea;
             }
             .btn {
-                width: 100%;
+                width: auto;
                 padding: 15px;
                 border: none;
                 border-radius: 8px;
@@ -565,7 +609,13 @@ try:
                 font-weight: 600;
                 cursor: pointer;
                 transition: all 0.3s;
-                margin-bottom: 10px;
+                flex: 1;
+                min-width: 200px;
+            }
+            .button-row {
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
             }
             .btn-primary {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -660,8 +710,9 @@ try:
             <div class="header">
                 <h1>♿ Доступная навигация</h1>
                 <p>Персонализированные маршруты для людей с ограниченными возможностями</p>
-                <div class="links">
-                    <a href="/submit">Добавить объект</a>
+                <div class="accessibility-buttons">
+                    <button id="voiceBtn" class="btn-accessibility">🔊 Голосовое сопровождение</button>
+                    <button id="contrastBtn" class="btn-accessibility">👓 Режим для слабовидящих</button>
                 </div>
             </div>
             <div class="content">
@@ -671,7 +722,7 @@ try:
                             <label for="startAddress">
                                 <span class="icon">📍</span>Откуда
                             </label>
-                            <input type="text" id="startAddress" placeholder="Введите адрес или 'current'" required>
+                            <input type="text" id="startAddress" placeholder="Введите адрес или 'current'" required title="Введите адрес отправления или 'current' для использования геолокации">
                             <div class="geolocation-status" id="geoStatus"></div>
                         </div>
                         
@@ -679,7 +730,7 @@ try:
                             <label for="endAddress">
                                 <span class="icon">🎯</span>Куда
                             </label>
-                            <input type="text" id="endAddress" list="destinations" placeholder="Введите адрес или выберите организацию" required>
+                            <input type="text" id="endAddress" list="destinations" placeholder="Введите адрес или выберите организацию" required title="Введите адрес назначения или выберите организацию из списка">
                             <datalist id="destinations"></datalist>
                         </div>
                         
@@ -687,13 +738,14 @@ try:
                             <label for="mobilityType">
                                 <span class="icon">👤</span>Тип ограничений
                             </label>
-                            <select id="mobilityType" required>
+                            <select id="mobilityType" required title="Выберите тип ограничений мобильности">
                                 <option value="колясочник">♿ Колясочник</option>
                                 <option value="слабовидящий">👓 Слабовидящий</option>
                                 <option value="опора на трость">🦯 Опора на трость</option>
                             </select>
                         </div>
-                        
+
+                        <div class="button-row">
                         <button type="submit" class="btn btn-primary">
                             <span class="icon">🗺️</span>Построить маршрут
                         </button>
@@ -709,6 +761,7 @@ try:
                         <button type="button" class="btn btn-voice" id="voiceBtn" style="display:none;">
                             <span class="icon">🔊</span>Озвучить маршрут
                         </button>
+                        </div>
                     </form>
                     
                     <div class="loading" id="loading">
@@ -752,6 +805,209 @@ try:
             let markers = [];
             let userLocation = null;
             let currentRoute = null;
+            let currentInput = null;
+            let startCoords = null;
+            let endCoords = null;
+
+            // Track focused input
+            document.getElementById('startAddress').addEventListener('focus', () => currentInput = 'startAddress');
+            document.getElementById('endAddress').addEventListener('focus', () => currentInput = 'endAddress');
+
+            // Autocomplete for endAddress
+            let suggestionBox = document.createElement('div');
+            suggestionBox.id = 'suggestions';
+            suggestionBox.style.cssText = `
+                position: absolute;
+                background: white;
+                border: 1px solid #ccc;
+                max-height: 200px;
+                overflow-y: auto;
+                z-index: 1000;
+                display: none;
+                width: 100%;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            `;
+            document.getElementById('endAddress').parentNode.style.position = 'relative';
+            document.getElementById('endAddress').parentNode.appendChild(suggestionBox);
+
+            let selectedIndex = -1;
+
+            function updateSelection() {
+                const items = suggestionBox.children;
+                for (let i = 0; i < items.length; i++) {
+                    items[i].style.background = i === selectedIndex ? '#667eea' : 'white';
+                    items[i].style.color = i === selectedIndex ? 'white' : 'black';
+                }
+            }
+
+            document.getElementById('endAddress').addEventListener('input', async e => {
+                const query = e.target.value;
+                if (query.length < 1) {
+                    suggestionBox.style.display = 'none';
+                    return;
+                }
+                try {
+                    const res = await fetch('/api/suggest_address?q=' + encodeURIComponent(query));
+                    const suggestions = await res.json();
+                    suggestionBox.innerHTML = '';
+                    selectedIndex = -1;
+                    suggestions.forEach((s, index) => {
+                        const div = document.createElement('div');
+                        div.textContent = s;
+                        div.style.cssText = 'padding: 8px; cursor: pointer; border-bottom: 1px solid #eee;';
+                        div.addEventListener('click', () => {
+                            e.target.value = s;
+                            suggestionBox.style.display = 'none';
+                        });
+                        div.addEventListener('mouseover', () => {
+                            selectedIndex = index;
+                            updateSelection();
+                        });
+                        suggestionBox.appendChild(div);
+                    });
+                    suggestionBox.style.display = suggestions.length ? 'block' : 'none';
+                } catch (err) {
+                    suggestionBox.style.display = 'none';
+                }
+            });
+
+            document.getElementById('endAddress').addEventListener('keydown', e => {
+                const items = suggestionBox.children;
+                if (suggestionBox.style.display === 'none' || items.length === 0) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    selectedIndex = (selectedIndex + 1) % items.length;
+                    updateSelection();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    selectedIndex = selectedIndex <= 0 ? items.length - 1 : selectedIndex - 1;
+                    updateSelection();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (selectedIndex >= 0) {
+                        items[selectedIndex].click();
+                    }
+                } else if (e.key === 'Escape') {
+                    suggestionBox.style.display = 'none';
+                    selectedIndex = -1;
+                }
+            });
+
+            // Hide suggestions on outside click
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('#endAddress') && !e.target.closest('#suggestions')) {
+                    suggestionBox.style.display = 'none';
+                    selectedIndex = -1;
+                }
+            });
+
+            // Autocomplete for startAddress
+            let startSuggestionBox = document.createElement('div');
+            startSuggestionBox.id = 'startSuggestions';
+            startSuggestionBox.style.cssText = `
+                position: absolute;
+                background: white;
+                border: 1px solid #ccc;
+                max-height: 200px;
+                overflow-y: auto;
+                z-index: 1000;
+                display: none;
+                width: 100%;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            `;
+            document.getElementById('startAddress').parentNode.style.position = 'relative';
+            document.getElementById('startAddress').parentNode.appendChild(startSuggestionBox);
+
+            let startSelectedIndex = -1;
+
+            function updateStartSelection() {
+                const items = startSuggestionBox.children;
+                for (let i = 0; i < items.length; i++) {
+                    items[i].style.background = i === startSelectedIndex ? '#667eea' : 'white';
+                    items[i].style.color = i === startSelectedIndex ? 'white' : 'black';
+                }
+            }
+
+            document.getElementById('startAddress').addEventListener('input', async e => {
+                const query = e.target.value.toLowerCase();
+                if (query.length < 1 || query === 'current') {
+                    startSuggestionBox.style.display = 'none';
+                    return;
+                }
+                try {
+                    const res = await fetch('/api/suggest_address?q=' + encodeURIComponent(query));
+                    const suggestions = await res.json();
+                    startSuggestionBox.innerHTML = '';
+                    startSelectedIndex = -1;
+                    suggestions.forEach((s, index) => {
+                        const div = document.createElement('div');
+                        div.textContent = s;
+                        div.style.cssText = 'padding: 8px; cursor: pointer; border-bottom: 1px solid #eee;';
+                        div.addEventListener('click', () => {
+                            e.target.value = s;
+                            startSuggestionBox.style.display = 'none';
+                        });
+                        div.addEventListener('mouseover', () => {
+                            startSelectedIndex = index;
+                            updateStartSelection();
+                        });
+                        startSuggestionBox.appendChild(div);
+                    });
+                    startSuggestionBox.style.display = suggestions.length ? 'block' : 'none';
+                } catch (err) {
+                    startSuggestionBox.style.display = 'none';
+                }
+            });
+
+            document.getElementById('startAddress').addEventListener('keydown', e => {
+                const items = startSuggestionBox.children;
+                if (startSuggestionBox.style.display === 'none' || items.length === 0) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    startSelectedIndex = (startSelectedIndex + 1) % items.length;
+                    updateStartSelection();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    startSelectedIndex = startSelectedIndex <= 0 ? items.length - 1 : startSelectedIndex - 1;
+                    updateStartSelection();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (startSelectedIndex >= 0) {
+                        items[startSelectedIndex].click();
+                    }
+                } else if (e.key === 'Escape') {
+                    startSuggestionBox.style.display = 'none';
+                    startSelectedIndex = -1;
+                }
+            });
+
+            // Hide start suggestions on outside click
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('#startAddress') && !e.target.closest('#startSuggestions')) {
+                    startSuggestionBox.style.display = 'none';
+                    startSelectedIndex = -1;
+                }
+            });
+
+            // Map click for address
+            map.on('click', async e => {
+                if (!currentInput) return;
+                const { lng, lat } = e.lngLat;
+                try {
+                    const res = await fetch(`/api/reverse_geocode?lat=${lat}&lon=${lng}`);
+                    const data = await res.json();
+                    if (data.address) {
+                        document.getElementById(currentInput).value = data.address;
+                        if (currentInput === 'startAddress') {
+                            startCoords = { lat, lon };
+                        } else if (currentInput === 'endAddress') {
+                            endCoords = { lat, lon };
+                        }
+                    }
+                } catch (err) {
+                    console.error('Reverse geocode failed');
+                }
+            });
 
             // Очистка старого маршрута
             function clearRoute() {
@@ -762,6 +1018,8 @@ try:
                 }
                 markers.forEach(m => m.remove());
                 markers = [];
+                startCoords = null;
+                endCoords = null;
             }
 
             // Отображение маршрута
@@ -848,18 +1106,32 @@ try:
             }
 
             // Геолокация
-            document.getElementById('useLocationBtn').addEventListener('click', () => {
-                navigator.geolocation.getCurrentPosition(pos => {
-                    userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-                    document.getElementById('startAddress').value = 'current';
+            document.getElementById('useLocationBtn').addEventListener('click', async () => {
+                navigator.geolocation.getCurrentPosition(async pos => {
+                    const lat = pos.coords.latitude;
+                    const lon = pos.coords.longitude;
+                    startCoords = { lat, lon };
                     document.getElementById('geoStatus').innerHTML = `Геолокация: ±${pos.coords.accuracy.toFixed(0)} м`;
                     document.getElementById('geoStatus').style.color = 'green';
 
+                    // Reverse geocode to get address
+                    try {
+                        const res = await fetch(`/api/reverse_geocode?lat=${lat}&lon=${lon}`);
+                        const data = await res.json();
+                        if (data.address) {
+                            document.getElementById('startAddress').value = data.address;
+                        } else {
+                            document.getElementById('startAddress').value = `Координаты: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                        }
+                    } catch (err) {
+                        document.getElementById('startAddress').value = `Координаты: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                    }
+
                     new maplibregl.Marker({ color: '#3b82f6' })
-                        .setLngLat([userLocation.lon, userLocation.lat])
+                        .setLngLat([lon, lat])
                         .setPopup(new maplibregl.Popup().setHTML('<b>Вы здесь</b>'))
                         .addTo(map);
-                    map.flyTo({ center: [userLocation.lon, userLocation.lat], zoom: 16 });
+                    map.flyTo({ center: [lon, lat], zoom: 16 });
                 }, err => {
                     document.getElementById('geoStatus').textContent = 'Геолокация недоступна';
                     document.getElementById('geoStatus').style.color = 'red';
@@ -875,7 +1147,9 @@ try:
                     start_address: document.getElementById('startAddress').value,
                     end_address: document.getElementById('endAddress').value,
                     mobility_type: document.getElementById('mobilityType').value,
-                    user_location: userLocation
+                    user_location: userLocation,
+                    start_coords: startCoords,
+                    end_coords: endCoords
                 };
 
                 document.getElementById('loading').classList.add('active');
@@ -895,7 +1169,11 @@ try:
                         document.getElementById('routeInfo').style.display = 'block';
                         document.getElementById('voiceBtn').style.display = 'block';
                     } else {
-                        alert('Ошибка: ' + data.error);
+                        if (data.error.includes('адрес')) {
+                            alert('Объект не найден');
+                        } else {
+                            alert('Ошибка: ' + data.error);
+                        }
                     }
                 } catch (err) {
                     alert('Сервер недоступен');
@@ -948,6 +1226,55 @@ try:
                     console.error('Failed to load destinations:', err);
                 }
             }
+
+            // Accessibility features
+            let voiceMode = false;
+            let highContrast = false;
+
+            document.getElementById('voiceBtn').addEventListener('click', () => {
+                voiceMode = !voiceMode;
+                document.getElementById('voiceBtn').textContent = voiceMode ? '🔊 Выключить голос' : '🔊 Голосовое сопровождение';
+            });
+
+            document.getElementById('contrastBtn').addEventListener('click', () => {
+                highContrast = !highContrast;
+                document.body.classList.toggle('high-contrast', highContrast);
+                document.getElementById('contrastBtn').textContent = highContrast ? '👓 Обычный режим' : '👓 Режим для слабовидящих';
+            });
+
+            // Voice announcements for inputs, selects, and buttons
+            document.querySelectorAll('input').forEach(el => {
+                el.addEventListener('focus', () => {
+                    if (voiceMode && 'speechSynthesis' in window) {
+                        const label = el.previousElementSibling ? el.previousElementSibling.textContent.replace('📍', '').replace('🎯', '').replace('👤', '').trim() : el.placeholder;
+                        speechSynthesis.speak(new SpeechSynthesisUtterance(label));
+                    }
+                });
+            });
+
+            document.querySelectorAll('select').forEach(el => {
+                el.addEventListener('focus', () => {
+                    if (voiceMode && 'speechSynthesis' in window) {
+                        const label = el.previousElementSibling ? el.previousElementSibling.textContent.replace('📍', '').replace('🎯', '').replace('👤', '').trim() : 'Выбор';
+                        speechSynthesis.speak(new SpeechSynthesisUtterance(label));
+                    }
+                });
+                el.addEventListener('change', () => {
+                    if (voiceMode && 'speechSynthesis' in window) {
+                        const selected = el.options[el.selectedIndex].text;
+                        speechSynthesis.speak(new SpeechSynthesisUtterance('Выбрано: ' + selected));
+                    }
+                });
+            });
+
+            document.querySelectorAll('button').forEach(el => {
+                el.addEventListener('click', () => {
+                    if (voiceMode && 'speechSynthesis' in window) {
+                        const text = el.textContent.replace(/[^\w\sа-яё]/gi, '').trim();
+                        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+                    }
+                });
+            });
         </script>
     </body>
     </html>
@@ -977,7 +1304,9 @@ try:
             start_address=start_address,
             end_address=end_address,
             mobility_type=mobility_type,
-            user_location=(user_location['lat'], user_location['lon']) if user_location else None
+            user_location=(user_location['lat'], user_location['lon']) if user_location else None,
+            start_coords=data.get('start_coords'),
+            end_coords=data.get('end_coords')
         )
 
         return jsonify(result)
@@ -987,6 +1316,100 @@ try:
         # Return list of organizations for destination selection
         orgs = [{"name": org.name, "address": org.address, "categories": org.served_disability_categories} for org in organizations[:50]]  # Limit to 50 for UI
         return jsonify(orgs)
+
+    def clean_address(full_address):
+        parts = full_address.split(', ')
+        cleaned = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Skip postal codes (5+ digits)
+            if part.isdigit() and len(part) >= 5:
+                continue
+            # Skip country
+            if part.lower() in ['россия', 'russia']:
+                continue
+            # Skip regions if too long
+            if len(part) > 20 and any(word in part.lower() for word in ['область', 'край', 'республика']):
+                continue
+            cleaned.append(part)
+            if len(cleaned) >= 3:
+                break
+        return ', '.join(cleaned)
+        parts = full_address.split(', ')
+        cleaned = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Skip postal codes (5+ digits)
+            if part.isdigit() and len(part) >= 5:
+                continue
+            # Skip country
+            if part.lower() in ['россия', 'russia']:
+                continue
+            # Skip regions if too long
+            if len(part) > 20 and any(word in part.lower() for word in ['область', 'край', 'республика']):
+                continue
+            cleaned.append(part)
+            if len(cleaned) >= 3:
+                break
+        return ', '.join(cleaned)
+
+    @app.route('/api/suggest_address')
+    def api_suggest_address():
+        query = request.args.get('q', '').strip().lower()
+        if not query:
+            return jsonify([])
+        conn = sqlite3.connect("accessibility.db")
+        cursor = conn.cursor()
+        # Get from accessibility_objects
+        cursor.execute("SELECT DISTINCT address FROM accessibility_objects WHERE LOWER(address) LIKE ? LIMIT 5", ('%' + query + '%',))
+        db_addresses = [row[0] for row in cursor.fetchall()]
+        # Get from user_submissions
+        cursor.execute("SELECT DISTINCT address FROM user_submissions WHERE LOWER(address) LIKE ? LIMIT 5", ('%' + query + '%',))
+        db_addresses.extend([row[0] for row in cursor.fetchall()])
+        conn.close()
+        # Remove duplicates
+        unique_addresses = list(set(db_addresses))[:5]
+        if len(unique_addresses) < 5:
+            # Fallback to OSM
+            try:
+                response = requests.get(
+                    f"{nav_system.osm.base_url}/search",
+                    params={"q": request.args.get('q', ''), "format": "json", "limit": 5 - len(unique_addresses), "countrycodes": "ru"},
+                    headers=nav_system.osm.headers,
+                    timeout=5
+                )
+                response.raise_for_status()
+                data = response.json()
+                osm_addresses = [clean_address(item['display_name']) for item in data]
+                unique_addresses.extend(osm_addresses)
+            except Exception as e:
+                print(f"Suggest error: {e}")
+        return jsonify(unique_addresses[:5])
+
+    @app.route('/api/reverse_geocode')
+    def api_reverse_geocode():
+        lat = request.args.get('lat')
+        lon = request.args.get('lon')
+        if not lat or not lon:
+            return jsonify({"error": "Missing lat/lon"})
+        try:
+            response = requests.get(
+                f"{nav_system.osm.base_url}/reverse",
+                params={"lat": lat, "lon": lon, "format": "json", "zoom": 18, "addressdetails": 1},
+                headers=nav_system.osm.headers,
+                timeout=5
+            )
+            response.raise_for_status()
+            data = response.json()
+            address = clean_address(data.get('display_name', ''))
+            return jsonify({"address": address})
+        except Exception as e:
+            print(f"Reverse geocode error: {e}")
+            return jsonify({"error": "Reverse geocoding failed"})
 
     @app.route('/submit')
     def submit_page():
@@ -1053,7 +1476,7 @@ try:
                     gap: 15px;
                 }
                 .btn {
-                    width: 100%;
+                    width: auto;
                     padding: 15px;
                     border: none;
                     border-radius: 8px;
@@ -1064,6 +1487,12 @@ try:
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
+                    flex: 1;
+                }
+                .button-row {
+                    display: flex;
+                    gap: 10px;
+                    flex-wrap: wrap;
                 }
                 .btn-primary {
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1080,6 +1509,40 @@ try:
                 .btn-secondary:hover {
                     background: #e0e0e0;
                 }
+                .accessibility-buttons { margin-top: 20px; }
+                .btn-accessibility {
+                    background: rgba(102, 126, 234, 0.2);
+                    color: #667eea;
+                    border: 1px solid #667eea;
+                    padding: 8px 12px;
+                    border-radius: 6px;
+                    font-size: 0.9em;
+                    cursor: pointer;
+                    margin: 0 5px;
+                    transition: all 0.3s;
+                }
+                .btn-accessibility:hover {
+                    background: rgba(102, 126, 234, 0.3);
+                }
+                .high-contrast {
+                    background: #000 !important;
+                    color: #fff !important;
+                }
+                .high-contrast .container {
+                    background: #111 !important;
+                }
+                .high-contrast .form-group label {
+                    color: #fff !important;
+                }
+                .high-contrast input, .high-contrast select, .high-contrast textarea {
+                    background: #333 !important;
+                    color: #fff !important;
+                    border-color: #fff !important;
+                }
+                .high-contrast .btn {
+                    background: #fff !important;
+                    color: #000 !important;
+                }
             </style>
         </head>
         <body>
@@ -1087,12 +1550,16 @@ try:
                 <div class="header">
                     <h1>♿ Добавить объект доступности</h1>
                     <p>Помогите сделать город доступнее</p>
+                    <div class="accessibility-buttons">
+                        <button id="voiceBtn" class="btn-accessibility">🔊 Голосовое сопровождение</button>
+                        <button id="contrastBtn" class="btn-accessibility">👓 Режим для слабовидящих</button>
+                    </div>
                 </div>
                 <div class="content">
                     <form action="/api/submit" method="post" enctype="multipart/form-data">
                         <div class="form-group">
                             <label>Тип объекта:</label>
-                            <select name="feature_type" required>
+                            <select name="feature_type" required title="Выберите тип объекта доступности">
                                 <option value="пандус_стационарный">Пандус стационарный</option>
                                 <option value="пандус_откидной">Пандус откидной</option>
                                 <option value="лифт">Лифт</option>
@@ -1104,22 +1571,150 @@ try:
                         </div>
                         <div class="form-group">
                             <label>Описание:</label>
-                            <textarea name="description" required></textarea>
+                            <textarea name="description" required title="Опишите объект доступности подробно"></textarea>
                         </div>
                         <div class="form-group">
                             <label>Адрес:</label>
-                            <input type="text" name="address" required>
+                            <input type="text" name="address" required title="Введите полный адрес объекта доступности">
                         </div>
                         <div class="form-group">
                             <label>Фото:</label>
-                            <input type="file" name="photo" accept="image/*" required>
+                            <input type="file" name="photo" accept="image/*" required title="Загрузите фото объекта (изображение)">
                         </div>
+                        <div class="button-row">
                         <button type="submit" class="btn btn-primary">Отправить на проверку</button>
                         <a href="/" class="btn btn-secondary">Назад</a>
+                        </div>
                     </form>
                 </div>
             </div>
         </body>
+        <script>
+            let submitSuggestionBox = document.createElement('div');
+            submitSuggestionBox.id = 'submitSuggestions';
+            submitSuggestionBox.style.cssText = `position: absolute; background: white; border: 1px solid #ccc; max-height: 200px; overflow-y: auto; z-index: 1000; display: none; width: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.1);`;
+            document.querySelector('input[name="address"]').parentNode.style.position = 'relative';
+            document.querySelector('input[name="address"]').parentNode.appendChild(submitSuggestionBox);
+
+            let submitSelectedIndex = -1;
+
+            function updateSubmitSelection() {
+                const items = submitSuggestionBox.children;
+                for (let i = 0; i < items.length; i++) {
+                    items[i].style.background = i === submitSelectedIndex ? '#667eea' : 'white';
+                    items[i].style.color = i === submitSelectedIndex ? 'white' : 'black';
+                }
+            }
+
+            document.querySelector('input[name="address"]').addEventListener('input', async e => {
+                const query = e.target.value;
+                if (query.length < 1) {
+                    submitSuggestionBox.style.display = 'none';
+                    return;
+                }
+                try {
+                    const res = await fetch('/api/suggest_address?q=' + encodeURIComponent(query));
+                    const suggestions = await res.json();
+                    submitSuggestionBox.innerHTML = '';
+                    submitSelectedIndex = -1;
+                    suggestions.forEach((s, index) => {
+                        const div = document.createElement('div');
+                        div.textContent = s;
+                        div.style.cssText = 'padding: 8px; cursor: pointer; border-bottom: 1px solid #eee;';
+                        div.addEventListener('click', () => {
+                            e.target.value = s;
+                            submitSuggestionBox.style.display = 'none';
+                        });
+                        div.addEventListener('mouseover', () => {
+                            submitSelectedIndex = index;
+                            updateSubmitSelection();
+                        });
+                        submitSuggestionBox.appendChild(div);
+                    });
+                    submitSuggestionBox.style.display = suggestions.length ? 'block' : 'none';
+                } catch (err) {
+                    submitSuggestionBox.style.display = 'none';
+                }
+            });
+
+            document.querySelector('input[name="address"]').addEventListener('keydown', e => {
+                const items = submitSuggestionBox.children;
+                if (submitSuggestionBox.style.display === 'none' || items.length === 0) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    submitSelectedIndex = (submitSelectedIndex + 1) % items.length;
+                    updateSubmitSelection();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    submitSelectedIndex = submitSelectedIndex <= 0 ? items.length - 1 : submitSelectedIndex - 1;
+                    updateSubmitSelection();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (submitSelectedIndex >= 0) {
+                        items[submitSelectedIndex].click();
+                    }
+                } else if (e.key === 'Escape') {
+                    submitSuggestionBox.style.display = 'none';
+                    submitSelectedIndex = -1;
+                }
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('input[name="address"]') && !e.target.closest('#submitSuggestions')) {
+                    submitSuggestionBox.style.display = 'none';
+                    submitSelectedIndex = -1;
+                }
+            });
+
+            // Accessibility features
+            let voiceMode = false;
+            let highContrast = false;
+
+            document.getElementById('voiceBtn').addEventListener('click', () => {
+                voiceMode = !voiceMode;
+                document.getElementById('voiceBtn').textContent = voiceMode ? '🔊 Выключить голос' : '🔊 Голосовое сопровождение';
+            });
+
+            document.getElementById('contrastBtn').addEventListener('click', () => {
+                highContrast = !highContrast;
+                document.body.classList.toggle('high-contrast', highContrast);
+                document.getElementById('contrastBtn').textContent = highContrast ? '👓 Обычный режим' : '👓 Режим для слабовидящих';
+            });
+
+            // Voice announcements for inputs, selects, and buttons
+            document.querySelectorAll('input').forEach(el => {
+                el.addEventListener('focus', () => {
+                    if (voiceMode && 'speechSynthesis' in window) {
+                        const label = el.previousElementSibling ? el.previousElementSibling.textContent.trim() : el.placeholder;
+                        speechSynthesis.speak(new SpeechSynthesisUtterance(label));
+                    }
+                });
+            });
+
+            document.querySelectorAll('select').forEach(el => {
+                el.addEventListener('focus', () => {
+                    if (voiceMode && 'speechSynthesis' in window) {
+                        const label = el.previousElementSibling ? el.previousElementSibling.textContent.trim() : 'Выбор';
+                        speechSynthesis.speak(new SpeechSynthesisUtterance(label));
+                    }
+                });
+                el.addEventListener('change', () => {
+                    if (voiceMode && 'speechSynthesis' in window) {
+                        const selected = el.options[el.selectedIndex].text;
+                        speechSynthesis.speak(new SpeechSynthesisUtterance('Выбрано: ' + selected));
+                    }
+                });
+            });
+
+            document.querySelectorAll('button').forEach(el => {
+                el.addEventListener('click', () => {
+                    if (voiceMode && 'speechSynthesis' in window) {
+                        const text = el.textContent.replace(/[^\w\sа-яё]/gi, '').trim();
+                        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+                    }
+                });
+            });
+        </script>
         </html>
         """)
 
