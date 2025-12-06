@@ -71,6 +71,33 @@ def draw_tula_districts_robust():
         ).add_to(m)
 
     folium.LayerControl().add_to(m)
+
+    # Добавляем объекты доступности
+    conn = sqlite3.connect("db/accessibility.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT feature_type, latitude, longitude, description, address FROM accessibility_objects")
+    objects = cursor.fetchall()
+    conn.close()
+
+    color_map = {
+        'пандус_стационарный': '#3b82f6', 'лифт': '#8b5cf6', 'широкая_дверь': '#ec4899',
+        'доступная_парковка': '#06b6d4', 'тактильная_плитка_направляющая': '#f97316',
+        'светофор_звуковой': '#10b981', 'поручни': '#a16207', 'понижение_бордюра': '#84cc16'
+    }
+
+    for obj in objects:
+        feature_type, lat, lon, desc, addr = obj
+        color = color_map.get(feature_type, '#6b7280')
+        folium.CircleMarker(
+            location=[lat, lon],
+            radius=6,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.8,
+            popup=f"<b>{feature_type.replace('_', ' ').title()}</b><br>{desc}<br><small>{addr}</small>"
+        ).add_to(m)
+
     output_file = "tula_districts/tula_districts_fixed.html"
     m.save(output_file)
     print(f"Карта успешно сохранена: {output_file}")
