@@ -1621,13 +1621,18 @@ try:
                 const audio = document.getElementById('bgMusic');
                 audio.src = '/music/julija-chicherina-tu-lu-la.mp3';
                 audio.play();
+
+                // Attach close button event
+                const closeBtn = document.getElementById('closeVideoModal');
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', closeModal);
+                }
             }
 
             // Enhanced modal close functionality
             const modal = document.getElementById('videoModal');
-            const closeBtn = document.getElementById('closeVideoModal');
-            
             function closeModal() {
+                const modal = document.getElementById('videoModal');
                 modal.style.display = 'none';
                 const video = document.getElementById('samovarVideo');
                 video.pause();
@@ -1635,10 +1640,6 @@ try:
                 const audio = document.getElementById('bgMusic');
                 audio.pause();
                 audio.currentTime = 0; // Reset audio
-            }
-            
-            if (closeBtn) {
-                closeBtn.addEventListener('click', closeModal);
             }
             window.onclick = function(event) {
                 if (event.target == modal) {
