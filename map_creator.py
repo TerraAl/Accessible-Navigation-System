@@ -388,6 +388,14 @@ class AccessibleNavigationSystem:
         # 4. Выбираем до 6 лучших объектов (по приоритету + близости + порядку следования)
         priorities = self.feature_priorities.get(mobility_type, {})
 
+        # Compute cumulative distances along the route
+        cum_dist = [0.0]
+        for i in range(1, len(base_route_coords)):
+            prev = base_route_coords[i-1]
+            curr = base_route_coords[i]
+            dist = ((curr[0] - prev[0])**2 + (curr[1] - prev[1])**2)**0.5
+            cum_dist.append(cum_dist[-1] + dist)
+
         def score_object(obj):
             lat, lon, ftype, desc, addr, dist = obj
             priority = priorities.get(ftype, 0)
@@ -395,18 +403,36 @@ class AccessibleNavigationSystem:
             start_dist = ((lat - start_lat)**2 + (lon - start_lon)**2)**0.5
             end_dist = ((lat - end_lat)**2 + (lon - end_lon)**2)**0.5
             position_bonus = max(0, 0.001 - min(start_dist, end_dist)) * 100000  # бонус за близость к началу/концу
-            distance_penalty = dist * 500000  # уменьшенный штраф
+            distance_penalty = dist * 500000  # штраф за удаленность от маршрута
             return priority * 1000 + position_bonus - distance_penalty
 
         unique_objects.sort(key=score_object, reverse=True)
         best_objects = unique_objects[:6]
 
-        # Сортируем выбранные объекты по расстоянию от начала (для логичного порядка)
-        def distance_from_start(obj):
+        # Add cumulative distance to each object and sort by position along route
+        for i, obj in enumerate(best_objects):
+            obj = list(obj)  # convert tuple to list
             lat, lon = obj[0], obj[1]
-            return ((lat - start_lat)**2 + (lon - start_lon)**2)**0.5
+            min_d = float('inf')
+            closest_idx = 0
+            for idx, (rlat, rlon) in enumerate(base_route_coords):
+                d = ((lat - rlat)**2 + (lon - rlon)**2)**0.5
+                if d < min_d:
+                    min_d = d
+                    closest_idx = idx
+            obj_cum_dist = cum_dist[closest_idx]
+            obj.append(obj_cum_dist)
+            best_objects[i] = obj  # update the list
 
-        best_objects.sort(key=distance_from_start)
+        best_objects.sort(key=lambda x: x[6])  # sort by cumulative distance
+
+        # Filter to ensure minimum distance along route to avoid close waypoints
+        min_route_distance = 0.009  # ~1km along route
+        filtered_objects = []
+        for obj in best_objects:
+            if not filtered_objects or all(abs(obj[6] - o[6]) > min_route_distance for o in filtered_objects):
+                filtered_objects.append(obj)
+        best_objects = filtered_objects[:3]  # limit to 3 waypoints max
 
         # 5. Строим финальный маршрут: старт → лучшие объекты → финиш
         waypoints = [start_coords_tuple] + [(obj[0], obj[1]) for obj in best_objects] + [end_coords_tuple]
@@ -425,7 +451,7 @@ class AccessibleNavigationSystem:
         # Строим маршрут через выбранные объекты одним запросом
         final_route, full_data = self.osm.get_route_multi(waypoints)
 
-        if not final_route or full_data["distance"] > base_distance * 2.0:
+        if not final_route or full_data["distance"] > base_distance * 1.5:
             # Если крюк слишком большой или ошибка — возвращаем короткий маршрут
             final_route = base_route_coords
             total_distance = base_distance
@@ -509,8 +535,7 @@ class AccessibleNavigationSystem:
                     feature = random.choice(features)
                     description = f"Generated {feature.replace('_', ' ')}"
                     address = f"Near pedestrian route at {new_lat:.4f}, {new_lon:.4f}"
-                    start_lat, start_lon = base_route_coords[0]
-                    obj_dist = ((new_lat - start_lat)**2 + (new_lon - start_lon)**2)**0.5
+                    obj_dist = dist_to_route(new_lat, new_lon)
                     obj = (new_lat, new_lon, feature, description, address, obj_dist)
                     objects.append(obj)
         else:
@@ -518,8 +543,7 @@ class AccessibleNavigationSystem:
                 feature = random.choice(features)
                 description = f"Generated {feature.replace('_', ' ')} on pedestrian route"
                 address = f"On pedestrian route at {lat:.4f}, {lon:.4f}"
-                start_lat, start_lon = base_route_coords[0]
-                obj_dist = ((lat - start_lat)**2 + (lon - start_lon)**2)**0.5
+                obj_dist = dist_to_route(lat, lon)
                 obj = (lat, lon, feature, description, address, obj_dist)
                 objects.append(obj)
         return objects
