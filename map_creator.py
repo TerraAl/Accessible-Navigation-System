@@ -835,15 +835,13 @@ try:
         <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
 
         <script>
-            // Инициализация MapLibre GL JS — СОВРЕМЕННАЯ КАРТА 2025
+            // Инициализация MapLibre GL JS
             const map = new maplibregl.Map({
                 container: 'map',
                 style: 'https://tiles.stadiamaps.com/styles/outdoors.json',
-                // Альтернатива: стиль от OpenStreetMap France (очень красивый)
-                // style: 'https://tiles.stadiamaps.com/styles/osm_bright.json',
-                center: [37.6175, 54.1931], // центр Тулы
+                center: [37.6175, 54.1931],
                 zoom: 12,
-                pitch: 30,     // лёгкий 3D-наклон
+                pitch: 30,
                 bearing: 0
             });
 
@@ -854,337 +852,193 @@ try:
             }));
 
             let routeLayer = null;
-            let markers = [];
-            let userLocation = null;
-            let currentRoute = null;
-            let currentInput = null;
-            let startCoords = null;
-            let endCoords = null;
+            let routeSource = null;
+            let accessibilityMarkers = [];
+            let startMarker = null;
+            let endMarker = null;
+            let userLocationMarker = null;
 
-            // Track focused input
-            document.getElementById('startAddress').addEventListener('focus', () => currentInput = 'startAddress');
-            document.getElementById('endAddress').addEventListener('focus', () => currentInput = 'endAddress');
+            // Полная очистка карты
+            function clearMapCompletely() {
+                if (routeLayer && map.getLayer('route')) map.removeLayer('route');
+                if (routeSource && map.getSource('route')) map.removeSource('route');
+                routeLayer = routeSource = null;
 
-            // Autocomplete for endAddress
-            let suggestionBox = document.createElement('div');
-            suggestionBox.id = 'suggestions';
-            suggestionBox.style.cssText = `
-                position: absolute;
-                background: white;
-                border: 1px solid #ccc;
-                max-height: 200px;
-                overflow-y: auto;
-                z-index: 1000;
-                display: none;
-                width: 100%;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            `;
-            document.getElementById('endAddress').parentNode.style.position = 'relative';
-            document.getElementById('endAddress').parentNode.appendChild(suggestionBox);
+                accessibilityMarkers.forEach(m => m.remove());
+                accessibilityMarkers = [];
 
-            let selectedIndex = -1;
-
-            function updateSelection() {
-                const items = suggestionBox.children;
-                for (let i = 0; i < items.length; i++) {
-                    items[i].style.background = i === selectedIndex ? '#667eea' : 'white';
-                    items[i].style.color = i === selectedIndex ? 'white' : 'black';
-                }
-            }
-
-            document.getElementById('endAddress').addEventListener('input', async e => {
-                const query = e.target.value;
-                if (query.length < 1) {
-                    suggestionBox.style.display = 'none';
-                    return;
-                }
-                try {
-                    const res = await fetch('/api/suggest_address?q=' + encodeURIComponent(query));
-                    const suggestions = await res.json();
-                    suggestionBox.innerHTML = '';
-                    selectedIndex = -1;
-                    suggestions.forEach((s, index) => {
-                        const div = document.createElement('div');
-                        div.textContent = s;
-                        div.style.cssText = 'padding: 8px; cursor: pointer; border-bottom: 1px solid #eee;';
-                        div.addEventListener('click', () => {
-                            e.target.value = s;
-                            suggestionBox.style.display = 'none';
-                        });
-                        div.addEventListener('mouseover', () => {
-                            selectedIndex = index;
-                            updateSelection();
-                        });
-                        suggestionBox.appendChild(div);
-                    });
-                    suggestionBox.style.display = suggestions.length ? 'block' : 'none';
-                } catch (err) {
-                    suggestionBox.style.display = 'none';
-                }
-            });
-
-            document.getElementById('endAddress').addEventListener('keydown', e => {
-                const items = suggestionBox.children;
-                if (suggestionBox.style.display === 'none' || items.length === 0) return;
-                if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    selectedIndex = (selectedIndex + 1) % items.length;
-                    updateSelection();
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    selectedIndex = selectedIndex <= 0 ? items.length - 1 : selectedIndex - 1;
-                    updateSelection();
-                } else if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (selectedIndex >= 0) {
-                        items[selectedIndex].click();
-                    }
-                } else if (e.key === 'Escape') {
-                    suggestionBox.style.display = 'none';
-                    selectedIndex = -1;
-                }
-            });
-
-            // Hide suggestions on outside click
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('#endAddress') && !e.target.closest('#suggestions')) {
-                    suggestionBox.style.display = 'none';
-                    selectedIndex = -1;
-                }
-            });
-
-            // Autocomplete for startAddress
-            let startSuggestionBox = document.createElement('div');
-            startSuggestionBox.id = 'startSuggestions';
-            startSuggestionBox.style.cssText = `
-                position: absolute;
-                background: white;
-                border: 1px solid #ccc;
-                max-height: 200px;
-                overflow-y: auto;
-                z-index: 1000;
-                display: none;
-                width: 100%;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            `;
-            document.getElementById('startAddress').parentNode.style.position = 'relative';
-            document.getElementById('startAddress').parentNode.appendChild(startSuggestionBox);
-
-            let startSelectedIndex = -1;
-
-            function updateStartSelection() {
-                const items = startSuggestionBox.children;
-                for (let i = 0; i < items.length; i++) {
-                    items[i].style.background = i === startSelectedIndex ? '#667eea' : 'white';
-                    items[i].style.color = i === startSelectedIndex ? 'white' : 'black';
-                }
-            }
-
-            document.getElementById('startAddress').addEventListener('input', async e => {
-                const query = e.target.value.toLowerCase();
-                if (query.length < 1 || query === 'текущий') {
-                    startSuggestionBox.style.display = 'none';
-                    return;
-                }
-                try {
-                    const res = await fetch('/api/suggest_address?q=' + encodeURIComponent(query));
-                    const suggestions = await res.json();
-                    startSuggestionBox.innerHTML = '';
-                    startSelectedIndex = -1;
-                    suggestions.forEach((s, index) => {
-                        const div = document.createElement('div');
-                        div.textContent = s;
-                        div.style.cssText = 'padding: 8px; cursor: pointer; border-bottom: 1px solid #eee;';
-                        div.addEventListener('click', () => {
-                            e.target.value = s;
-                            startSuggestionBox.style.display = 'none';
-                        });
-                        div.addEventListener('mouseover', () => {
-                            startSelectedIndex = index;
-                            updateStartSelection();
-                        });
-                        startSuggestionBox.appendChild(div);
-                    });
-                    startSuggestionBox.style.display = suggestions.length ? 'block' : 'none';
-                } catch (err) {
-                    startSuggestionBox.style.display = 'none';
-                }
-            });
-
-            document.getElementById('startAddress').addEventListener('keydown', e => {
-                const items = startSuggestionBox.children;
-                if (startSuggestionBox.style.display === 'none' || items.length === 0) return;
-                if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    startSelectedIndex = (startSelectedIndex + 1) % items.length;
-                    updateStartSelection();
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    startSelectedIndex = startSelectedIndex <= 0 ? items.length - 1 : startSelectedIndex - 1;
-                    updateStartSelection();
-                } else if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (startSelectedIndex >= 0) {
-                        items[startSelectedIndex].click();
-                    }
-                } else if (e.key === 'Escape') {
-                    startSuggestionBox.style.display = 'none';
-                    startSelectedIndex = -1;
-                }
-            });
-
-            // Hide start suggestions on outside click
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('#startAddress') && !e.target.closest('#startSuggestions')) {
-                    startSuggestionBox.style.display = 'none';
-                    startSelectedIndex = -1;
-                }
-            });
-
-            // Map click for address
-            map.on('click', async e => {
-                if (!currentInput) return;
-                const { lng, lat } = e.lngLat;
-                try {
-                    const res = await fetch(`/api/reverse_geocode?lat=${lat}&lon=${lng}`);
-                    const data = await res.json();
-                    if (data.address) {
-                        document.getElementById(currentInput).value = data.address;
-                        if (currentInput === 'startAddress') {
-                            startCoords = { lat, lon };
-                        } else if (currentInput === 'endAddress') {
-                            endCoords = { lat, lon };
-                        }
-                    }
-                } catch (err) {
-                    console.error('Reverse geocode failed');
-                }
-            });
-
-            // Очистка старого маршрута
-            function clearRoute() {
-                if (routeLayer) {
-                    map.removeLayer('route');
-                    map.removeSource('route');
-                    routeLayer = null;
-                }
-                markers.forEach(m => m.remove());
-                markers = [];
-                startCoords = null;
-                endCoords = null;
+                if (startMarker) startMarker.remove();
+                if (endMarker) endMarker.remove();
+                if (userLocationMarker) userLocationMarker.remove();
+                startMarker = endMarker = userLocationMarker = null;
             }
 
             // Отображение маршрута
             function displayRoute(data) {
-                clearRoute();
+                clearMapCompletely();
 
-                const coords = data.route_coords.map(c => [c[1], c[0]]); // [lon, lat]
+                const coords = data.route_coords.map(c => [c[1], c[0]]);
 
-                // Линия маршрута
                 map.addSource('route', {
                     type: 'geojson',
-                    data: {
-                        type: 'Feature',
-                        properties: {},
-                        geometry: {
-                            type: 'LineString',
-                            coordinates: coords
-                        }
-                    }
+                    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }
                 });
-
                 map.addLayer({
                     id: 'route',
                     type: 'line',
                     source: 'route',
-                    layout: { 'line-cap': 'round', 'line-join': 'round' },
-                    paint: {
-                        'line-color': '#667eea',
-                        'line-width': 7,
-                        'line-opacity': 0.9
-                    }
+                    paint: { 'line-color': '#667eea', 'line-width': 7, 'line-opacity': 0.9 }
                 });
+                routeSource = 'route';
+                routeLayer = 'route';
 
-                routeLayer = true;
-
-                // Маркер начала (зелёный)
-                new maplibregl.Marker({ color: '#4ade80' })
+                // Старт и финиш
+                startMarker = new maplibregl.Marker({ color: '#4ade80' })
                     .setLngLat(coords[0])
                     .setPopup(new maplibregl.Popup().setHTML(`<b>Начало</b><br>${data.start.address}`))
                     .addTo(map);
 
-                // Маркер конца (красный)
-                new maplibregl.Marker({ color: '#f87171' })
+                endMarker = new maplibregl.Marker({ color: '#f87171' })
                     .setLngLat(coords[coords.length - 1])
                     .setPopup(new maplibregl.Popup().setHTML(`<b>Финиш</b><br>${data.end.address}`))
                     .addTo(map);
 
                 // Объекты доступности
-                const usedPositions = new Set();
+                const colorMap = {
+                    'пандус_стационарный': '#3b82f6', 'лифт': '#8b5cf6', 'широкая_дверь': '#ec4899',
+                    'доступная_парковка': '#06b6d4', 'тактильная_плитка_направляющая': '#f97316',
+                    'светофор_звуковой': '#10b981', 'поручни': '#a16207', 'понижение_бордюра': '#84cc16'
+                };
+
                 data.accessibility_objects.forEach(obj => {
-                    let [lon, lat] = [obj.longitude, obj.latitude];
-                    const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
-                    let attempts = 0;
-                    while (usedPositions.has(key) && attempts < 10) {
-                        lat += (Math.random() - 0.5) * 0.0005; // ~50m jitter
-                        lon += (Math.random() - 0.5) * 0.0005;
-                        key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
-                        attempts++;
-                    }
-                    usedPositions.add(key);
-
-                    const color = {
-                        'пандус_стационарный': '#3b82f6',
-                        'лифт': '#8b5cf6',
-                        'тактильная_плитка_направляющая': '#f97316',
-                        'светофор_звуковой': '#10b981',
-                        'поручни': '#a16207',
-                        'доступная_парковка': '#06b6d4'
-                    }[obj.feature_type] || '#6b7280';
-
-                    new maplibregl.Marker({ color })
-                        .setLngLat([lon, lat])
+                    const marker = new maplibregl.Marker({ color: colorMap[obj.feature_type] || '#6b7280' })
+                        .setLngLat([obj.longitude, obj.latitude])
                         .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
                             <b>${obj.feature_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</b><br>
-                            ${obj.description}<br>
-                            <small><i>${obj.address}</i></small>
+                            ${obj.description}<br><small><i>${obj.address}</i></small>
                         `))
                         .addTo(map);
+                    accessibilityMarkers.push(marker);
                 });
 
-                // Подгоняем камеру
-                const bounds = coords.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coords[0], coords[0]));
-                map.fitBounds(bounds, { padding: 80, duration: 2000 });
+                const bounds = new maplibregl.LngLatBounds(coords[0], coords[0]);
+                coords.forEach(c => bounds.extend(c));
+                map.fitBounds(bounds, { padding: 100, duration: 2000 });
             }
 
+            // === АВТОДОПОЛНЕНИЕ ДЛЯ startAddress ===
+            const startInput = document.getElementById('startAddress');
+            const startSuggestions = document.createElement('div');
+            startSuggestions.className = 'suggestions';
+            startInput.parentNode.style.position = 'relative';
+            startInput.parentNode.appendChild(startSuggestions);
+
+            // === АВТОДОПОЛНЕНИЕ ДЛЯ endAddress ===
+            const endInput = document.getElementById('endAddress');
+            const endSuggestions = document.createElement('div');
+            endSuggestions.className = 'suggestions';
+            endInput.parentNode.style.position = 'relative';
+            endInput.parentNode.appendChild(endSuggestions);
+
+            // Стили для подсказок
+            const style = document.createElement('style');
+            style.textContent = `
+                .suggestions {
+                    position: absolute;
+                    top: 100%;
+                    left: 0;
+                    right: 0;
+                    background: white;
+                    border: 1px solid #ccc;
+                    max-height: 200px;
+                    overflow-y: auto;
+                    z-index: 1000;
+                    display: none;
+                    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+                    border-radius: 8px;
+                    margin-top: 4px;
+                }
+                .suggestions div {
+                    padding: 12px;
+                    cursor: pointer;
+                    border-bottom: 1px solid #eee;
+                }
+                .suggestions div:hover, .suggestions div.active {
+                    background: #667eea;
+                    color: white;
+                }
+            `;
+            document.head.appendChild(style);
+
+            // Универсальная функция автодополнения
+            async function showSuggestions(input, box) {
+                const query = input.value.trim();
+                if (query.length < 2) {
+                    box.style.display = 'none';
+                    return;
+                }
+
+                try {
+                    const res = await fetch(`/api/suggest_address?q=${encodeURIComponent(query)}`);
+                    const suggestions = await res.json();
+
+                    box.innerHTML = '';
+                    if (suggestions.length === 0) {
+                        box.style.display = 'none';
+                        return;
+                    }
+
+                    suggestions.forEach((s, i) => {
+                        const div = document.createElement('div');
+                        div.textContent = s;
+                        div.onclick = () => {
+                            input.value = s;
+                            box.style.display = 'none';
+                        };
+                        div.onmouseover = () => {
+                            box.querySelectorAll('div').forEach(d => d.classList.remove('active'));
+                            div.classList.add('active');
+                        };
+                        box.appendChild(div);
+                    });
+
+                    box.style.display = 'block';
+                } catch (err) {
+                    box.style.display = 'none';
+                }
+            }
+
+            // Обработчики
+            startInput.addEventListener('input', () => showSuggestions(startInput, startSuggestions));
+            endInput.addEventListener('input', () => showSuggestions(endInput, endSuggestions));
+
+            // Скрытие при клике вне
+            document.addEventListener('click', e => {
+                if (!e.target.closest('#startAddress') && !e.target.closest('.suggestions')) {
+                    startSuggestions.style.display = 'none';
+                }
+                if (!e.target.closest('#endAddress') && !e.target.closest('.suggestions')) {
+                    endSuggestions.style.display = 'none';
+                }
+            });
+
             // Геолокация
-            document.getElementById('useLocationBtn').addEventListener('click', async () => {
+            document.getElementById('useLocationBtn').addEventListener('click', () => {
                 navigator.geolocation.getCurrentPosition(async pos => {
                     const lat = pos.coords.latitude;
                     const lon = pos.coords.longitude;
-                    startCoords = { lat, lon };
-                    document.getElementById('geoStatus').innerHTML = `Геолокация: ±${pos.coords.accuracy.toFixed(0)} м`;
-                    document.getElementById('geoStatus').style.color = 'green';
 
-                    // Reverse geocode to get address
-                    try {
-                        const res = await fetch(`/api/reverse_geocode?lat=${lat}&lon=${lon}`);
-                        const data = await res.json();
-                        if (data.address) {
-                            document.getElementById('startAddress').value = data.address;
-                        } else {
-                            document.getElementById('startAddress').value = `Координаты: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-                        }
-                    } catch (err) {
-                        document.getElementById('startAddress').value = `Координаты: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-                    }
-
-                    new maplibregl.Marker({ color: '#3b82f6' })
+                    if (userLocationMarker) userLocationMarker.remove();
+                    userLocationMarker = new maplibregl.Marker({ color: '#3b82f6' })
                         .setLngLat([lon, lat])
                         .setPopup(new maplibregl.Popup().setHTML('<b>Вы здесь</b>'))
                         .addTo(map);
+
+                    document.getElementById('startAddress').value = 'current';
+                    document.getElementById('geoStatus').innerHTML = `Геолокация: ±${pos.coords.accuracy.toFixed(0)} м`;
+                    document.getElementById('geoStatus').style.color = 'green';
                     map.flyTo({ center: [lon, lat], zoom: 16 });
-                }, err => {
+                }, () => {
                     document.getElementById('geoStatus').textContent = 'Геолокация недоступна';
                     document.getElementById('geoStatus').style.color = 'red';
                 });
@@ -1193,38 +1047,27 @@ try:
             // Построение маршрута
             document.getElementById('routeForm').addEventListener('submit', async e => {
                 e.preventDefault();
-                clearRoute();
+                clearMapCompletely();
 
                 const payload = {
                     start_address: document.getElementById('startAddress').value,
                     end_address: document.getElementById('endAddress').value,
-                    mobility_type: document.getElementById('mobilityType').value,
-                    user_location: userLocation,
-                    start_coords: startCoords,
-                    end_coords: endCoords
+                    mobility_type: document.getElementById('mobilityType').value
                 };
 
                 document.getElementById('loading').classList.add('active');
 
                 try {
-                    const res = await fetch('/api/route', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
+                    const res = await fetch('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     const data = await res.json();
 
                     if (data.success) {
-                        currentRoute = data;
                         displayRoute(data);
                         document.getElementById('routeDescription').textContent = data.description;
                         document.getElementById('routeInfo').style.display = 'block';
+                        document.getElementById('voiceBtn').style.display = 'block';
                     } else {
-                        if (data.error.includes('адрес')) {
-                            alert('Объект не найден');
-                        } else {
-                            alert('Ошибка: ' + data.error);
-                        }
+                        alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
                     }
                 } catch (err) {
                     alert('Сервер недоступен');
@@ -1233,108 +1076,29 @@ try:
                 }
             });
 
-            // Озвучка (без изменений)
+            // Озвучка
             document.getElementById('voiceBtn').addEventListener('click', () => {
                 if (!currentRoute || !('speechSynthesis' in window)) return;
                 speechSynthesis.cancel();
                 const texts = [
                     `Маршрут от ${currentRoute.start.address} до ${currentRoute.end.address}`,
-                    `Расстояние: ${currentRoute.total_distance} метров. Время в пути: ${currentRoute.duration_minutes} минут`,
-                    ...currentRoute.accessibility_objects.slice(0, 6).map(o =>
-                        `${o.feature_type.replace(/_/g, ' ')} — ${o.description}`
-                    ),
-                    "Приятного пути!"
+                    `Расстояние: ${currentRoute.total_distance} метров. Время: ${currentRoute.duration_minutes} минут`,
+                    ...currentRoute.accessibility_objects.map(o => `${o.feature_type.replace(/_/g, ' ')} — ${o.description}`),
+                    "Приятного и безопасного пути!"
                 ];
                 let i = 0;
                 const speak = () => {
                     if (i >= texts.length) return;
                     const utter = new SpeechSynthesisUtterance(texts[i++]);
                     utter.lang = 'ru-RU';
+                    utter.rate = 0.9;
                     utter.onend = speak;
                     speechSynthesis.speak(utter);
                 };
                 speak();
             });
 
-            // Загрузка карты
-            map.on('load', () => {
-                console.log("MapLibre GL JS загружен — современная карта готова!");
-                loadDestinations();
-            });
-
-            // Загрузка списка организаций
-            async function loadDestinations() {
-                const mobilityType = document.getElementById('mobilityType').value;
-                try {
-                    const res = await fetch('/api/organizations?mobility_type=' + encodeURIComponent(mobilityType));
-                    const orgs = await res.json();
-                    const datalist = document.getElementById('destinations');
-                    datalist.innerHTML = '';
-                    orgs.forEach(org => {
-                        const option = document.createElement('option');
-                        let value = org.name + ', ' + org.address;
-                        if (org.warning) {
-                            value += ' ⚠️ ' + org.warning;
-                        }
-                        option.value = value;
-                        datalist.appendChild(option);
-                    });
-                } catch (err) {
-                    console.error('Failed to load destinations:', err);
-                }
-            }
-
-            // Reload destinations when mobility type changes
-            document.getElementById('mobilityType').addEventListener('change', loadDestinations);
-
-            // Accessibility features
-            let voiceMode = false;
-            let highContrast = false;
-
-            document.getElementById('voiceBtn').addEventListener('click', () => {
-                voiceMode = !voiceMode;
-                document.getElementById('voiceBtn').textContent = voiceMode ? '🔊 Выключить голос' : '🔊 Голосовое сопровождение';
-            });
-
-            document.getElementById('contrastBtn').addEventListener('click', () => {
-                highContrast = !highContrast;
-                document.body.classList.toggle('high-contrast', highContrast);
-                document.getElementById('contrastBtn').textContent = highContrast ? '👓 Обычный режим' : '👓 Режим для слабовидящих';
-            });
-
-            // Voice announcements for inputs, selects, and buttons
-            document.querySelectorAll('input').forEach(el => {
-                el.addEventListener('focus', () => {
-                    if (voiceMode && 'speechSynthesis' in window) {
-                        const label = el.previousElementSibling ? el.previousElementSibling.textContent.replace('📍', '').replace('🎯', '').replace('👤', '').trim() : el.placeholder;
-                        speechSynthesis.speak(new SpeechSynthesisUtterance(label));
-                    }
-                });
-            });
-
-            document.querySelectorAll('select').forEach(el => {
-                el.addEventListener('focus', () => {
-                    if (voiceMode && 'speechSynthesis' in window) {
-                        const label = el.previousElementSibling ? el.previousElementSibling.textContent.replace('📍', '').replace('🎯', '').replace('👤', '').trim() : 'Выбор';
-                        speechSynthesis.speak(new SpeechSynthesisUtterance(label));
-                    }
-                });
-                el.addEventListener('change', () => {
-                    if (voiceMode && 'speechSynthesis' in window) {
-                        const selected = el.options[el.selectedIndex].text;
-                        speechSynthesis.speak(new SpeechSynthesisUtterance('Выбрано: ' + selected));
-                    }
-                });
-            });
-
-            document.querySelectorAll('button').forEach(el => {
-                el.addEventListener('click', () => {
-                    if (voiceMode && 'speechSynthesis' in window) {
-                        const text = el.textContent.replace(/[^\w\sа-яё]/gi, '').trim();
-                        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-                    }
-                });
-            });
+            map.on('load', () => console.log("MapLibre готова — всё идеально!"));
         </script>
     </body>
     </html>
