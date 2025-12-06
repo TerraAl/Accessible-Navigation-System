@@ -10,26 +10,108 @@ import math
 import os
 import shutil
 import geopandas as gpd
+import osmnx as ox
+import folium
+import matplotlib.colors as mcolors
+
+def draw_tula_districts_robust():
+    print("Загружаю границы районов Тулы через поиск административных единиц...")
+
+    # 1. Используем features_from_place вместо geocode_to_gdf
+    # Мы ищем внутри "Тула, Россия" все объекты с тегом admin_level=9
+    # (В России admin_level=9 обычно соответствует внутригородским районам/округам)
+    try:
+        gdf = ox.features_from_place(
+            "Тула, Россия",
+            tags={"admin_level": "9", "boundary": "administrative"}
+        )
+    except Exception as e:
+        print(f"Критическая ошибка при запросе: {e}")
+        return
+
+    # 2. Фильтрация данных
+    # Иногда OSM возвращает не только полигоны, но и точки (центры районов).
+    # Нам нужны только Полигоны (границы).
+    gdf = gdf[gdf.geometry.type.isin(['Polygon', 'MultiPolygon'])]
+
+    print(f"Найдено районов: {len(gdf)}")
+
+    if len(gdf) == 0:
+        print("Районы не найдены. Возможно, изменился admin_level в OSM.")
+        return
+
+    # 3. Создаем карту
+    # Центрируем карту по центроиду всех найденных районов
+    center_lat = gdf.unary_union.centroid.y
+    center_lon = gdf.unary_union.centroid.x
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=11)
+
+    # 4. Рисуем
+    colors = list(mcolors.TABLEAU_COLORS.values())
+
+    # Сбрасываем индекс, чтобы итерироваться удобно
+    gdf = gdf.reset_index()
+
+    for idx, row in gdf.iterrows():
+        # Пытаемся получить понятное имя. В OSM оно часто в поле 'name'
+        district_name = row.get('name', f"Район {idx}")
+
+        color = colors[idx % len(colors)]
+
+        folium.GeoJson(
+            row['geometry'],
+            name=district_name,
+            style_function=lambda x, color=color: {
+                'fillColor': color,
+                'color': 'black',
+                'weight': 2,
+                'fillOpacity': 0.4
+            },
+            tooltip=folium.Tooltip(district_name)
+        ).add_to(m)
+
+    folium.LayerControl().add_to(m)
+    output_file = "tula_districts/tula_districts_fixed.html"
+    m.save(output_file)
+    print(f"Карта успешно сохранена: {output_file}")
 
 
 def get_tula_districts_from_osm():
+    print("Загружаю границы районов Тулы через поиск административных единиц...")
+
     try:
-        gdf = gpd.read_file('tula_districts/tula_administrative_districts.geojson')
-        districts = {}
-        for idx, row in gdf.iterrows():
-            name = row['name']
-            geom = row.geometry
-            if geom.type == 'Polygon':
-                coords = list(geom.exterior.coords)
-                districts[name] = coords
-            elif geom.type == 'MultiPolygon':
-                largest = max(geom, key=lambda p: p.area)
-                coords = list(largest.exterior.coords)
-                districts[name] = coords
-        return districts
+        gdf = ox.features_from_place(
+            "Тула, Россия",
+            tags={"admin_level": "9", "boundary": "administrative"}
+        )
     except Exception as e:
-        print(f"Error loading districts from GeoJSON: {e}")
+        print(f"Критическая ошибка при запросе: {e}")
         return {}
+
+    # Фильтрация данных
+    gdf = gdf[gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon'])]
+
+    print(f"Найдено районов: {len(gdf)}")
+
+    if len(gdf) == 0:
+        print("Районы не найдены. Возможно, изменился admin_level в OSM.")
+        return {}
+
+    districts = {}
+    gdf = gdf.reset_index()
+    for idx, row in gdf.iterrows():
+        district_name = row.get('name', f"Район {idx}")
+        geom = row.geometry
+        if geom.geom_type == 'Polygon':
+            coords = list(geom.exterior.coords)
+            districts[district_name] = coords
+        elif geom.geom_type == 'MultiPolygon':
+            largest = max(geom.geoms, key=lambda p: p.area)
+            coords = list(largest.exterior.coords)
+            districts[district_name] = coords
+    return districts
+
+
 
 
 class MobilityType(Enum):
@@ -101,17 +183,29 @@ TULA_DISTRICTS = {
 
 # Try to update with real boundaries from OSM
 osm_districts = get_tula_districts_from_osm()
-if osm_districts:
+if not osm_districts:
+    # Fallback to hardcoded
+    osm_districts = {}
+    for district, data in TULA_DISTRICTS.items():
+        osm_districts[district] = data["polygon"]
+else:
     name_mapping = {
         'Центральный район': 'Центральный',
         'Советский район': 'Советский',
         'Привокзальный район': 'Привокзальный',
         'Зареченский район': 'Зареченский',
-        'Пролетарский район': 'Пролетарский'
+        'Пролетарский район': 'Пролетарский',
+        'Центральный административный округ': 'Центральный',
+        'Советский административный округ': 'Советский',
+        'Центральный территориальный округ': 'Центральный',
+        'Советский территориальный округ': 'Советский',
+        'Привокзальный территориальный округ': 'Привокзальный',
+        'Зареченский территориальный округ': 'Зареченский',
+        'Пролетарский территориальный округ': 'Пролетарский'
     }
     for osm_name, coords in osm_districts.items():
         key = name_mapping.get(osm_name)
-        if key:
+        if key and key in TULA_DISTRICTS:
             TULA_DISTRICTS[key]['polygon'] = coords
             print(f"Updated {key} with OSM data")
 
@@ -753,7 +847,7 @@ class AccessibleNavigationSystem:
 
 # Flask веб-приложение
 try:
-    from flask import Flask, render_template_string, request, jsonify, redirect, url_for, send_from_directory, session, flash
+    from flask import Flask, render_template, render_template_string, request, jsonify, redirect, url_for, send_from_directory, session, flash
     from flask_cors import CORS
     from werkzeug.utils import secure_filename
     from werkzeug.security import generate_password_hash, check_password_hash
@@ -822,6 +916,7 @@ try:
             .header p { font-size: 1.2em; opacity: 0.9; }
             .header .links { margin-top: 20px; }
             .header .links a { color: white; margin: 0 10px; text-decoration: none; }
+            .header .links a[href="/admin/districts_folium"] { background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; }
             .accessibility-buttons { margin-top: 20px; }
             .btn-accessibility {
                 background: rgba(255,255,255,0.2);
@@ -1155,6 +1250,11 @@ try:
         <audio id="bgMusic" preload="auto"></audio>
 
         <script>
+            // Initialize speech synthesis
+            if ('speechSynthesis' in window) {
+                speechSynthesis.getVoices(); // Load voices
+            }
+
             // Инициализация MapLibre GL JS
             const map = new maplibregl.Map({
                 container: 'map',
@@ -1174,8 +1274,9 @@ try:
             // PNG click handling like the accessibility buttons above
             let pngClicked = 0;
             const totalPng = 3;
+            const pngElements = ['png1', 'png2', 'png3'];
 
-            ['png1', 'png2', 'png3'].forEach(id => {
+            pngElements.forEach(id => {
                 document.getElementById(id).addEventListener('click', () => {
                     document.getElementById(id).style.display = 'none';
                     pngClicked++;
@@ -1454,16 +1555,17 @@ try:
                 elementVoiceMode = !elementVoiceMode;
                 document.getElementById('elementVoiceBtn').textContent = elementVoiceMode ? '🔊 Выключить озвучивание' : '🔊 Озвучивание элементов';
                 document.getElementById('elementVoiceBtn').classList.toggle('active', elementVoiceMode);
+                if (elementVoiceMode) {
+                    speakText('Озвучивание элементов включено');
+                } else {
+                    speakText('Озвучивание элементов выключено');
+                }
             });
 
             document.getElementById('contrastBtn').addEventListener('click', () => {
                 highContrast = !highContrast;
                 document.body.classList.toggle('high-contrast', highContrast);
                 document.getElementById('contrastBtn').classList.toggle('active', highContrast);
-                if (highContrast) {
-                    // Озвучить все элементы интерфейса для слабовидящих
-                    announceInterface();
-                }
             });
 
             // Функция озвучивания с более человеческим голосом
@@ -2697,441 +2799,14 @@ try:
     def admin_districts():
         if not session.get('admin'):
             return redirect(url_for('admin_login'))
-        stats = get_district_statistics(nav_system.db.db_path)
-        return render_template_string("""
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Статистика по районам</title>
-            <link href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css' rel='stylesheet' />
-            <script src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'></script>
-            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body {
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    min-height: 100vh;
-                    padding: 20px;
-                }
-                .container {
-                    max-width: 1400px;
-                    margin: 0 auto;
-                    background: white;
-                    border-radius: 20px;
-                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                    overflow: hidden;
-                }
-                .header {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 30px;
-                    text-align: center;
-                }
-                .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-                .header p { font-size: 1.2em; opacity: 0.9; }
-                .header .links { margin-top: 20px; }
-                .header .links a { color: white; margin: 0 10px; text-decoration: none; }
-                .content {
-                    padding: 30px;
-                }
-                .stats-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                    gap: 20px;
-                    margin-bottom: 30px;
-                }
-                .stat-card {
-                    background: #f8f9fa;
-                    border-radius: 10px;
-                    padding: 20px;
-                    border-left: 4px solid #667eea;
-                }
-                .stat-card h3 {
-                    color: #667eea;
-                    margin-bottom: 15px;
-                }
-                .stat-value {
-                    font-size: 2em;
-                    font-weight: bold;
-                    color: #333;
-                }
-                .charts-container {
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 30px;
-                    margin-bottom: 30px;
-                }
-                .chart-wrapper {
-                    background: white;
-                    border-radius: 10px;
-                    padding: 20px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                }
-                #map {
-                    height: 500px;
-                    border-radius: 10px;
-                    margin-bottom: 30px;
-                }
-                .table-container {
-                    background: white;
-                    border-radius: 10px;
-                    padding: 20px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                    margin-bottom: 30px;
-                }
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                }
-                th, td {
-                    padding: 12px;
-                    text-align: left;
-                    border-bottom: 1px solid #ddd;
-                }
-                th {
-                    background: #f8f9fa;
-                    font-weight: 600;
-                }
-                .btn {
-                    padding: 12px 20px;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 1em;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.3s;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    text-decoration: none;
-                    display: inline-block;
-                }
-                .btn:hover {
-                    transform: translateY(-2px);
-                    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-                }
-                .export-btn {
-                    margin-bottom: 20px;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>📊 Статистика доступности по районам Тулы</h1>
-                    <p>Анализ объектов доступности в административных районах</p>
-                    <div class="links">
-                        <a href="/admin">← Админ панель</a>
-                        <a href="/admin/logout">Выйти</a>
-                    </div>
-                </div>
-                <div class="content">
-                    <div class="stats-grid">
-                        {% for district, data in stats.items() %}
-                        <div class="stat-card">
-                            <h3>{{ data.name }}</h3>
-                            <div class="stat-value">{{ data.total_objects }}</div>
-                            <p>объектов доступности</p>
-                        </div>
-                        {% endfor %}
-                    </div>
 
-                    <div class="charts-container">
-                        <div class="chart-wrapper">
-                            <canvas id="mobilityChart"></canvas>
-                        </div>
-                        <div class="chart-wrapper">
-                            <canvas id="districtChart"></canvas>
-                        </div>
-                    </div>
+        # Генерируем карту районов
+        draw_tula_districts_robust()
 
-                    <div id="map"></div>
+        # Получаем статистику по районам
+        districts_stats = get_district_statistics()
 
-
-                    <div class="table-container">
-                        <h3>Детальная статистика</h3>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Район</th>
-                                    <th>Всего объектов</th>
-                                    <th>Колясочники</th>
-                                    <th>Слабовидящие</th>
-                                    <th>Опора на трость</th>
-                                    <th>Другие</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for district, data in stats.items() %}
-                                <tr>
-                                    <td>{{ data.name }}</td>
-                                    <td>{{ data.total_objects }}</td>
-                                    <td>{{ data.by_mobility['колясочник'] }}</td>
-                                    <td>{{ data.by_mobility['слабовидящий'] }}</td>
-                                    <td>{{ data.by_mobility['опора на трость'] }}</td>
-                                    <td>{{ data.by_mobility['другие'] }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <a href="/admin/export_districts" class="btn export-btn">📥 Экспорт в Excel</a>
-                    <a href="/admin" class="btn">← Назад</a>
-                </div>
-            </div>
-
-            <script>
-                // Данные для графиков
-                const stats = {{ stats|tojson }};
-                const districts = Object.keys(stats);
-                const totalObjects = districts.map(d => stats[d].total_objects);
-                const wheelchair = districts.map(d => stats[d].by_mobility['колясочник']);
-                const visuallyImpaired = districts.map(d => stats[d].by_mobility['слабовидящий']);
-                const cane = districts.map(d => stats[d].by_mobility['опора на трость']);
-                const other = districts.map(d => stats[d].by_mobility['другие']);
-
-                // График по районам
-                const ctx1 = document.getElementById('districtChart').getContext('2d');
-                new Chart(ctx1, {
-                    type: 'bar',
-                    data: {
-                        labels: districts.map(d => stats[d].name),
-                        datasets: [{
-                            label: 'Всего объектов',
-                            data: totalObjects,
-                            backgroundColor: '#667eea',
-                            borderColor: '#667eea',
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            title: {
-                                display: true,
-                                text: 'Объекты доступности по районам'
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true
-                            }
-                        }
-                    }
-                });
-
-                // График по типам мобильности
-                const ctx2 = document.getElementById('mobilityChart').getContext('2d');
-                new Chart(ctx2, {
-                    type: 'radar',
-                    data: {
-                        labels: ['Колясочники', 'Слабовидящие', 'Опора на трость', 'Другие'],
-                        datasets: districts.map((district, i) => ({
-                            label: stats[district].name,
-                            data: [
-                                stats[district].by_mobility['колясочник'],
-                                stats[district].by_mobility['слабовидящий'],
-                                stats[district].by_mobility['опора на трость'],
-                                stats[district].by_mobility['другие']
-                            ],
-                            backgroundColor: `rgba(${50 + i*50}, ${100 + i*30}, ${200 - i*40}, 0.2)`,
-                            borderColor: `rgba(${50 + i*50}, ${100 + i*30}, ${200 - i*40}, 1)`,
-                            borderWidth: 2
-                        }))
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            title: {
-                                display: true,
-                                text: 'Распределение по типам инвалидности'
-                            }
-                        }
-                    }
-                });
-
-                // Карта с районами
-                const map = new maplibregl.Map({
-                    container: 'map',
-                    style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
-                    center: [37.6175, 54.1931],
-                    zoom: 13,
-                    pitch: 30,
-                    bearing: 0
-                });
-                map.addControl(new maplibregl.NavigationControl());
-                map.addControl(new maplibregl.GeolocateControl({
-                    positionOptions: { enableHighAccuracy: true },
-                    trackUserLocation: true
-                }));
-
-                // Добавляем районы как прямоугольники
-                const districtBounds = {
-                    'Центральный': [[54.185, 37.605], [54.200, 37.630]],
-                    'Советский': [[54.200, 37.600], [54.220, 37.640]],
-                    'Привокзальный': [[54.185, 37.630], [54.205, 37.650]],
-                    'Зареченский': [[54.175, 37.590], [54.195, 37.620]],
-                    'Пролетарский': [[54.180, 37.580], [54.200, 37.605]]
-                };
-
-                const colors = {
-                    'Центральный': '#ff6b6b',
-                    'Советский': '#4ecdc4',
-                    'Привокзальный': '#45b7d1',
-                    'Зареченский': '#f9ca24',
-                    'Пролетарский': '#6c5ce7'
-                };
-
-                // Данные полигонов районов [lat, lon] - не пересекающиеся границы
-                const districtPolygons = {
-                    'Центральный': [[54.180, 37.600], [54.180, 37.610], [54.180, 37.620], [54.180, 37.625], [54.190, 37.625], [54.200, 37.625], [54.200, 37.615], [54.200, 37.605], [54.200, 37.600], [54.190, 37.600]],
-                    'Советский': [[54.200, 37.600], [54.200, 37.610], [54.200, 37.620], [54.200, 37.630], [54.200, 37.640], [54.210, 37.640], [54.220, 37.640], [54.220, 37.630], [54.220, 37.620], [54.220, 37.610], [54.220, 37.600], [54.210, 37.600]],
-                    'Привокзальный': [[54.180, 37.625], [54.180, 37.635], [54.180, 37.645], [54.180, 37.650], [54.190, 37.650], [54.200, 37.650], [54.200, 37.640], [54.200, 37.630], [54.200, 37.625], [54.190, 37.625]],
-                    'Зареченский': [[54.170, 37.580], [54.170, 37.590], [54.170, 37.600], [54.170, 37.610], [54.175, 37.610], [54.180, 37.610], [54.185, 37.610], [54.185, 37.600], [54.185, 37.590], [54.185, 37.580], [54.180, 37.580], [54.175, 37.580]],
-                    'Пролетарский': [[54.185, 37.580], [54.185, 37.590], [54.185, 37.600], [54.185, 37.610], [54.190, 37.610], [54.195, 37.610], [54.200, 37.610], [54.200, 37.600], [54.200, 37.590], [54.200, 37.580], [54.195, 37.580], [54.190, 37.580]]
-                };
-
-    
-                // Modal close
-                const modal = document.getElementById('videoModal');
-                const closeBtn = document.getElementsByClassName('close')[0];
-                closeBtn.onclick = function() {
-                    modal.style.display = 'none';
-                    const video = document.getElementById('samovarVideo');
-                    video.pause();
-                    const audio = document.getElementById('bgMusic');
-                    audio.pause();
-                };
-                window.onclick = function(event) {
-                    if (event.target == modal) {
-                        modal.style.display = 'none';
-                        const video = document.getElementById('samovarVideo');
-                        video.pause();
-                        const audio = document.getElementById('bgMusic');
-                        audio.pause();
-                    }
-                };
-    
-                // Randomize PNG positions
-                pngElements.forEach(id => {
-                    const img = document.getElementById(id);
-                    const randomLeft = Math.random() * 80 + 10; // 10% to 90%
-                    img.style.top = 'calc(100vh - 150px)';
-                    img.style.left = randomLeft + '%';
-                });
-    
-                map.on('load', () => {
-                    console.log("MapLibre готова — всё идеально!");
-
-                    // Try to load real districts from geojson
-                    fetch('/tula_districts/tula_administrative_districts.geojson')
-                    .then(response => {
-                        if (!response.ok) throw new Error();
-                        return response.json();
-                    })
-                    .then(data => {
-                        // Use real data
-                        data.features.forEach(feature => {
-                            const name = feature.properties.name;
-                            const key = name.split(' ')[0]; // e.g. Центральный
-                            const color = colors[key] || '#888';
-                            map.addSource(name, {
-                                type: 'geojson',
-                                data: feature
-                            });
-                            map.addLayer({
-                                id: name,
-                                type: 'fill',
-                                source: name,
-                                paint: { 'fill-color': color, 'fill-opacity': 0.5 }
-                            });
-                            map.addLayer({
-                                id: name + '-border',
-                                type: 'line',
-                                source: name,
-                                paint: { 'line-color': color, 'line-width': 3 }
-                            });
-                            map.on('click', name + '-border', (e) => {
-                                const districtKey = Object.keys(stats).find(k => stats[k].name === name);
-                                if (districtKey) {
-                                    const d = stats[districtKey];
-                                    new maplibregl.Popup()
-                                        .setLngLat(e.lngLat)
-                                        .setHTML(`
-                                            <b>${d.name}</b><br>
-                                            Объектов: ${d.total_objects}<br>
-                                            Колясочники: ${d.by_mobility['колясочник']}<br>
-                                            Слабовидящие: ${d.by_mobility['слабовидящий']}<br>
-                                            Опора на трость: ${d.by_mobility['опора на трость']}
-                                        `)
-                                        .addTo(map);
-                                }
-                            });
-                            map.on('mouseenter', name + '-border', () => {
-                                map.getCanvas().style.cursor = 'pointer';
-                            });
-                            map.on('mouseleave', name + '-border', () => {
-                                map.getCanvas().style.cursor = '';
-                            });
-                        });
-                    })
-                    .catch(() => {
-                        // Fallback to hardcoded
-                        const districtPolygons = {
-                            'Центральный': [[54.180, 37.600], [54.180, 37.610], [54.180, 37.620], [54.180, 37.625], [54.190, 37.625], [54.200, 37.625], [54.200, 37.615], [54.200, 37.605], [54.200, 37.600], [54.190, 37.600]],
-                            'Советский': [[54.200, 37.600], [54.200, 37.610], [54.200, 37.620], [54.200, 37.630], [54.200, 37.640], [54.210, 37.640], [54.220, 37.640], [54.220, 37.630], [54.220, 37.620], [54.220, 37.610], [54.220, 37.600], [54.210, 37.600]],
-                            'Привокзальный': [[54.180, 37.625], [54.180, 37.635], [54.180, 37.645], [54.180, 37.650], [54.190, 37.650], [54.200, 37.650], [54.200, 37.640], [54.200, 37.630], [54.200, 37.625], [54.190, 37.625]],
-                            'Зареченский': [[54.170, 37.580], [54.170, 37.590], [54.170, 37.600], [54.170, 37.610], [54.175, 37.610], [54.180, 37.610], [54.185, 37.610], [54.185, 37.600], [54.185, 37.590], [54.185, 37.580], [54.180, 37.580], [54.175, 37.580]],
-                            'Пролетарский': [[54.185, 37.580], [54.185, 37.590], [54.185, 37.600], [54.185, 37.610], [54.190, 37.610], [54.195, 37.610], [54.200, 37.610], [54.200, 37.600], [54.200, 37.590], [54.200, 37.580], [54.195, 37.580], [54.190, 37.580]]
-                        };
-                        Object.keys(districtPolygons).forEach(district => {
-                            const polygon = districtPolygons[district];
-                            const coords = polygon.map(p => [p[1], p[0]]);
-                            coords.push(coords[0]);
-                            map.addSource(district, {
-                                type: 'geojson',
-                                data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] } }
-                            });
-                            map.addLayer({
-                                id: district,
-                                type: 'fill',
-                                source: district,
-                                paint: { 'fill-color': colors[district], 'fill-opacity': 0.5 }
-                            });
-                            map.addLayer({
-                                id: district + '-border',
-                                type: 'line',
-                                source: district,
-                                paint: { 'line-color': colors[district], 'line-width': 3 }
-                            });
-                            map.on('click', district + '-border', (e) => {
-                                new maplibregl.Popup()
-                                    .setLngLat(e.lngLat)
-                                    .setHTML(`
-                                        <b>${stats[district].name}</b><br>
-                                        Объектов: ${stats[district].total_objects}<br>
-                                        Колясочники: ${stats[district].by_mobility['колясочник']}<br>
-                                        Слабовидящие: ${d.by_mobility['слабовидящий']}<br>
-                                        Опора на трость: ${d.by_mobility['опора на трость']}
-                                    `)
-                                    .addTo(map);
-                            });
-                            map.on('mouseenter', district + '-border', () => {
-                                map.getCanvas().style.cursor = 'pointer';
-                            });
-                            map.on('mouseleave', district + '-border', () => {
-                                map.getCanvas().style.cursor = '';
-                            });
-                        });
-                    });
-                });
-            </script>
-        </body>
-        </html>
-        """, stats=stats)
+        return render_template('admin_districts.html', districts_stats=districts_stats)
 
     @app.route('/admin/export_districts')
     def export_districts():
@@ -3140,6 +2815,7 @@ try:
         stats = get_district_statistics(nav_system.db.db_path)
         filename = export_district_stats_to_excel(stats)
         return send_from_directory('.', filename, as_attachment=True)
+
 
     @app.route('/uploads/<filename>')
     def uploaded_file(filename):
