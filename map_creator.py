@@ -9,41 +9,26 @@ from datetime import datetime
 import math
 import os
 import shutil
-try:
-    import osmnx as ox
-    import geopandas as gpd
-    OSM_AVAILABLE = True
-except ImportError:
-    OSM_AVAILABLE = False
+import geopandas as gpd
 
 
 def get_tula_districts_from_osm():
-    if not OSM_AVAILABLE:
-        return {}
     try:
-        PLACE_NAME = "Тула, Russia"
-        gdf_place = ox.geocode_to_gdf(PLACE_NAME)
-        bbox = gdf_place.total_bounds
-        north, south, east, west = bbox[3], bbox[1], bbox[2], bbox[0]
-        tags = {"boundary": "administrative"}
-        adm = ox.geometries_from_bbox(north, south, east, west, tags)
-        polygons = adm[adm.geometry.type.isin(['Polygon','MultiPolygon'])].copy()
-        polygons = polygons.to_crs(epsg=4326)
+        gdf = gpd.read_file('tula_districts/tula_administrative_districts.geojson')
         districts = {}
-        for idx, row in polygons.iterrows():
-            name = row.get('name', '')
-            if 'район' in name.lower():
-                geom = row.geometry
-                if geom.type == 'Polygon':
-                    coords = list(geom.exterior.coords)
-                    districts[name] = coords
-                elif geom.type == 'MultiPolygon':
-                    largest = max(geom, key=lambda p: p.area)
-                    coords = list(largest.exterior.coords)
-                    districts[name] = coords
+        for idx, row in gdf.iterrows():
+            name = row['name']
+            geom = row.geometry
+            if geom.type == 'Polygon':
+                coords = list(geom.exterior.coords)
+                districts[name] = coords
+            elif geom.type == 'MultiPolygon':
+                largest = max(geom, key=lambda p: p.area)
+                coords = list(largest.exterior.coords)
+                districts[name] = coords
         return districts
     except Exception as e:
-        print(f"Error fetching districts from OSM: {e}")
+        print(f"Error loading districts from GeoJSON: {e}")
         return {}
 
 
@@ -825,6 +810,7 @@ try:
                 border-radius: 20px;
                 box-shadow: 0 20px 60px rgba(0,0,0,0.3);
                 overflow: hidden;
+                position: relative;
             }
             .header {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -891,6 +877,11 @@ try:
                 grid-template-columns: 400px 1fr;
                 gap: 0;
             }
+            .buttons {
+                display: flex;
+                justify-content: space-around;
+                padding: 20px;
+            }
             .sidebar {
                 padding: 30px;
                 border-right: 2px solid #f0f0f0;
@@ -956,6 +947,7 @@ try:
             #map {
                 height: calc(100vh - 200px);
                 min-height: 500px;
+                position: relative;
             }
             .route-info {
                 margin-top: 20px;
@@ -1005,16 +997,10 @@ try:
                 color: #666;
                 margin-top: 10px;
             }
-            .floating-png {
-                position: absolute;
-                width: 60px;
-                height: 60px;
-                cursor: pointer;
-                z-index: 1000;
-                transition: opacity 0.3s;
-            }
-            .floating-png.hidden {
-                display: none;
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.05); }
+                100% { transform: scale(1); }
             }
             .modal {
                 display: none;
@@ -1024,25 +1010,31 @@ try:
                 top: 0;
                 width: 100%;
                 height: 100%;
-                background-color: rgba(0,0,0,0.8);
+                background-color: rgba(0,0,0,0.9);
             }
             .modal-content {
-                background-color: #fefefe;
-                margin: 15% auto;
-                padding: 20px;
-                border: 1px solid #888;
-                width: 80%;
-                max-width: 600px;
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: transparent;
+                border: none;
+                padding: 0;
+                width: auto;
+                max-width: none;
             }
             .close {
-                color: #aaa;
-                float: right;
-                font-size: 28px;
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                color: white;
+                font-size: 36px;
                 font-weight: bold;
                 cursor: pointer;
+                z-index: 2001;
             }
             .close:hover {
-                color: black;
+                color: red;
             }
             #samovarVideo {
                 width: 100%;
@@ -1133,30 +1125,33 @@ try:
                 </div>
                 
                 <div id="map"></div>
+            </div>
 
-                <!-- PNG Buttons -->
-                <button id="png1" class="floating-png" style="top: 30px; left: 500px; background-image: url('/music/alien.png'); background-size: cover; border: none; background-color: transparent;" alt="PNG 1"></button>
-                <button id="png2" class="floating-png" style="top: 100px; left: 600px; background-image: url('/music/alien.png'); background-size: cover; border: none; background-color: transparent;" alt="PNG 2"></button>
-                <button id="png3" class="floating-png" style="top: 170px; left: 700px; background-image: url('/music/alien.png'); background-size: cover; border: none; background-color: transparent;" alt="PNG 3"></button>
+            <div id="pngContainer" style="display: flex; justify-content: space-around; padding: 20px; background: #f8f9fa; border-radius: 10px; margin: 20px;">
+                <button id="png1" class="icon-btn" style="width: 50px; height: 50px; border: none; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer;"><img src="/music/alien.png" style="width:100%; height:100%; object-fit:cover;" alt="icon"></button>
+                <button id="png2" class="icon-btn" style="width: 50px; height: 50px; border: none; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer;"><img src="/music/alien.png" style="width:100%; height:100%; object-fit:cover;" alt="icon"></button>
+                <button id="png3" class="icon-btn" style="width: 50px; height: 50px; border: none; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer;"><img src="/music/alien.png" style="width:100%; height:100%; object-fit:cover;" alt="icon"></button>
+            </div>
 
-                <!-- Notification -->
-                <div id="notification" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:20px; border:1px solid black; z-index:2000; border-radius:10px; box-shadow:0 0 10px rgba(0,0,0,0.5);"></div>
+            <!-- Notification -->
+            <div id="notification" style="display:none; position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:white; padding:20px; border:1px solid black; z-index:2000; border-radius:10px; box-shadow:0 0 10px rgba(0,0,0,0.5);"></div>
 
-                <!-- Video Modal -->
-                <div id="videoModal" class="modal">
-                    <div class="modal-content">
-                        <span class="close">&times;</span>
-                        <video id="samovarVideo" controls autoplay>
-                            <source src="/music/samovar.mp4" type="video/mp4">
-                            Your browser does not support the video tag.
-                        </video>
-                    </div>
+            <!-- Video Modal -->
+            <div id="videoModal" class="modal">
+                <div class="modal-content">
+                    <span id="closeVideoModal" class="close">&times;</span>
+                    <video id="samovarVideo" autoplay loop style="display: block; margin: 0 auto; width: 90vw; height: 90vh; object-fit: contain;">
+                        <source src="/music/samovar.mp4" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
                 </div>
             </div>
+
         </div>
         
         <link href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css' rel='stylesheet' />
         <script src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'></script>
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
         <audio id="bgMusic" preload="auto"></audio>
 
         <script>
@@ -1175,6 +1170,28 @@ try:
                 positionOptions: { enableHighAccuracy: true },
                 trackUserLocation: true
             }));
+
+            // PNG click handling like the accessibility buttons above
+            let pngClicked = 0;
+            const totalPng = 3;
+
+            ['png1', 'png2', 'png3'].forEach(id => {
+                document.getElementById(id).addEventListener('click', () => {
+                    document.getElementById(id).style.display = 'none';
+                    pngClicked++;
+                    const remaining = totalPng - pngClicked;
+
+                    if (remaining > 0) {
+                        showNotification(`🎉 Отлично! Найдено ${pngClicked}/${totalPng}. Осталось ${remaining} иконок!`, 3000);
+                    } else {
+                        // All icons found - show video and audio
+                        showNotification('🎊 Поздравляем! Вы нашли все иконки! Сейчас включится видео с самоваром!', 4000);
+                        setTimeout(() => {
+                            showVideoAndAudio();
+                        }, 2000);
+                    }
+                });
+            });
 
             let routeLayer = null;
             let routeSource = null;
@@ -1578,56 +1595,63 @@ try:
 
             document.getElementById('showAddressesBtn').addEventListener('click', showAddresses);
 
-            map.on('load', () => console.log("MapLibre готова — всё идеально!"));
-
-            // PNG click handling
-            let pngClicked = 0;
-            const totalPng = 3;
-            const pngElements = ['png1', 'png2', 'png3'];
-
-            pngElements.forEach(id => {
-                const img = document.getElementById(id);
-                img.addEventListener('click', () => {
-                    img.classList.add('hidden');
-                    pngClicked++;
-                    const remaining = totalPng - pngClicked;
-                    if (remaining > 0) {
-                        const notification = document.getElementById('notification');
-                        notification.textContent = `Осталось ${remaining} изображений`;
-                        notification.style.display = 'block';
-                        setTimeout(() => notification.style.display = 'none', 2000);
-                    } else {
-                        // Show modal
-                        const modal = document.getElementById('videoModal');
-                        modal.style.display = 'block';
-                        const video = document.getElementById('samovarVideo');
-                        video.play();
-                        const audio = document.getElementById('bgMusic');
-                        audio.src = '/music/julija-chicherina-tu-lu-la.mp3';
-                        audio.play();
-                    }
-                });
+            map.on('load', () => {
+                console.log("MapLibre готова — всё идеально!");
             });
 
-            // Modal close
+            function showNotification(message, duration) {
+                const notification = document.getElementById('notification');
+                notification.textContent = message;
+                notification.style.display = 'block';
+                notification.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+                notification.style.color = 'white';
+                notification.style.border = 'none';
+                notification.style.fontSize = '16px';
+                notification.style.fontWeight = 'bold';
+                setTimeout(() => {
+                    notification.style.display = 'none';
+                }, duration);
+            }
+
+            function showVideoAndAudio() {
+                const modal = document.getElementById('videoModal');
+                modal.style.display = 'block';
+                const video = document.getElementById('samovarVideo');
+                video.play();
+                const audio = document.getElementById('bgMusic');
+                audio.src = '/music/julija-chicherina-tu-lu-la.mp3';
+                audio.play();
+            }
+
+            // Enhanced modal close functionality
             const modal = document.getElementById('videoModal');
-            const closeBtn = document.getElementsByClassName('close')[0];
-            closeBtn.onclick = function() {
+            const closeBtn = document.getElementById('closeVideoModal');
+            
+            function closeModal() {
                 modal.style.display = 'none';
                 const video = document.getElementById('samovarVideo');
                 video.pause();
+                video.currentTime = 0; // Reset video
                 const audio = document.getElementById('bgMusic');
                 audio.pause();
-            };
+                audio.currentTime = 0; // Reset audio
+            }
+            
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closeModal);
+            }
             window.onclick = function(event) {
                 if (event.target == modal) {
-                    modal.style.display = 'none';
-                    const video = document.getElementById('samovarVideo');
-                    video.pause();
-                    const audio = document.getElementById('bgMusic');
-                    audio.pause();
+                    closeModal();
                 }
             };
+
+            // ESC key to close modal
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape' && modal.style.display === 'block') {
+                    closeModal();
+                }
+            });
         </script>
     </body>
     </html>
@@ -2824,6 +2848,7 @@ try:
 
                     <div id="map"></div>
 
+
                     <div class="table-container">
                         <h3>Детальная статистика</h3>
                         <table>
@@ -2968,31 +2993,6 @@ try:
                     'Пролетарский': [[54.185, 37.580], [54.185, 37.590], [54.185, 37.600], [54.185, 37.610], [54.190, 37.610], [54.195, 37.610], [54.200, 37.610], [54.200, 37.600], [54.200, 37.590], [54.200, 37.580], [54.195, 37.580], [54.190, 37.580]]
                 };
 
-                // PNG click handling
-                let pngClicked = 0;
-                const totalPng = 3;
-                const pngElements = ['png1', 'png2', 'png3'];
-    
-                pngElements.forEach(id => {
-                    const img = document.getElementById(id);
-                    img.addEventListener('click', () => {
-                        img.classList.add('hidden');
-                        pngClicked++;
-                        const remaining = totalPng - pngClicked;
-                        if (remaining > 0) {
-                            alert(`Осталось ${remaining} изображений`);
-                        } else {
-                            // Show modal
-                            const modal = document.getElementById('videoModal');
-                            modal.style.display = 'block';
-                            const video = document.getElementById('samovarVideo');
-                            video.play();
-                            const audio = document.getElementById('bgMusic');
-                            audio.src = '/music/julija-chicherina-tu-lu-la.mp3';
-                            audio.play();
-                        }
-                    });
-                });
     
                 // Modal close
                 const modal = document.getElementById('videoModal');
@@ -3017,13 +3017,14 @@ try:
                 // Randomize PNG positions
                 pngElements.forEach(id => {
                     const img = document.getElementById(id);
-                    const randomTop = Math.random() * 80 + 5; // 5% to 85%
-                    const randomLeft = Math.random() * 38 + 2; // 2% to 40%
-                    img.style.top = randomTop + '%';
+                    const randomLeft = Math.random() * 80 + 10; // 10% to 90%
+                    img.style.top = 'calc(100vh - 150px)';
                     img.style.left = randomLeft + '%';
                 });
     
                 map.on('load', () => {
+                    console.log("MapLibre готова — всё идеально!");
+
                     // Try to load real districts from geojson
                     fetch('/tula_districts/tula_administrative_districts.geojson')
                     .then(response => {
@@ -3112,8 +3113,8 @@ try:
                                         <b>${stats[district].name}</b><br>
                                         Объектов: ${stats[district].total_objects}<br>
                                         Колясочники: ${stats[district].by_mobility['колясочник']}<br>
-                                        Слабовидящие: ${stats[district].by_mobility['слабовидящий']}<br>
-                                        Опора на трость: ${stats[district].by_mobility['опора на трость']}
+                                        Слабовидящие: ${d.by_mobility['слабовидящий']}<br>
+                                        Опора на трость: ${d.by_mobility['опора на трость']}
                                     `)
                                     .addTo(map);
                             });

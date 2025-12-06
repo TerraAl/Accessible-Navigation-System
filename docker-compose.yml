@@ -8,5 +8,6 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./db:/app/db
+      - ../tula_districts:/app/tula_districts
     environment:
       - FLASK_ENV=development
