@@ -1007,8 +1007,8 @@ try:
             }
             .floating-png {
                 position: absolute;
-                width: 80px;
-                height: 80px;
+                width: 60px;
+                height: 60px;
                 cursor: pointer;
                 z-index: 1000;
                 transition: opacity 0.3s;
@@ -1134,10 +1134,13 @@ try:
                 
                 <div id="map"></div>
 
-                <!-- PNG Images -->
-                <img id="png1" src="/music/alien.png" class="floating-png" style="top: 20%; left: 5%;" alt="PNG 1">
-                <img id="png2" src="/music/alien.png" class="floating-png" style="top: 50%; left: 5%;" alt="PNG 2">
-                <img id="png3" src="/music/alien.png" class="floating-png" style="bottom: 20%; left: 5%;" alt="PNG 3">
+                <!-- PNG Buttons -->
+                <button id="png1" class="floating-png" style="top: 30px; left: 500px; background-image: url('/music/alien.png'); background-size: cover; border: none; background-color: transparent;" alt="PNG 1"></button>
+                <button id="png2" class="floating-png" style="top: 100px; left: 600px; background-image: url('/music/alien.png'); background-size: cover; border: none; background-color: transparent;" alt="PNG 2"></button>
+                <button id="png3" class="floating-png" style="top: 170px; left: 700px; background-image: url('/music/alien.png'); background-size: cover; border: none; background-color: transparent;" alt="PNG 3"></button>
+
+                <!-- Notification -->
+                <div id="notification" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:20px; border:1px solid black; z-index:2000; border-radius:10px; box-shadow:0 0 10px rgba(0,0,0,0.5);"></div>
 
                 <!-- Video Modal -->
                 <div id="videoModal" class="modal">
@@ -1576,6 +1579,55 @@ try:
             document.getElementById('showAddressesBtn').addEventListener('click', showAddresses);
 
             map.on('load', () => console.log("MapLibre готова — всё идеально!"));
+
+            // PNG click handling
+            let pngClicked = 0;
+            const totalPng = 3;
+            const pngElements = ['png1', 'png2', 'png3'];
+
+            pngElements.forEach(id => {
+                const img = document.getElementById(id);
+                img.addEventListener('click', () => {
+                    img.classList.add('hidden');
+                    pngClicked++;
+                    const remaining = totalPng - pngClicked;
+                    if (remaining > 0) {
+                        const notification = document.getElementById('notification');
+                        notification.textContent = `Осталось ${remaining} изображений`;
+                        notification.style.display = 'block';
+                        setTimeout(() => notification.style.display = 'none', 2000);
+                    } else {
+                        // Show modal
+                        const modal = document.getElementById('videoModal');
+                        modal.style.display = 'block';
+                        const video = document.getElementById('samovarVideo');
+                        video.play();
+                        const audio = document.getElementById('bgMusic');
+                        audio.src = '/music/julija-chicherina-tu-lu-la.mp3';
+                        audio.play();
+                    }
+                });
+            });
+
+            // Modal close
+            const modal = document.getElementById('videoModal');
+            const closeBtn = document.getElementsByClassName('close')[0];
+            closeBtn.onclick = function() {
+                modal.style.display = 'none';
+                const video = document.getElementById('samovarVideo');
+                video.pause();
+                const audio = document.getElementById('bgMusic');
+                audio.pause();
+            };
+            window.onclick = function(event) {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                    const video = document.getElementById('samovarVideo');
+                    video.pause();
+                    const audio = document.getElementById('bgMusic');
+                    audio.pause();
+                }
+            };
         </script>
     </body>
     </html>
@@ -2962,12 +3014,14 @@ try:
                     }
                 };
     
-                // Show PNGs after 3 seconds
-                setTimeout(() => {
-                    pngElements.forEach(id => {
-                        document.getElementById(id).classList.remove('hidden');
-                    });
-                }, 3000);
+                // Randomize PNG positions
+                pngElements.forEach(id => {
+                    const img = document.getElementById(id);
+                    const randomTop = Math.random() * 80 + 5; // 5% to 85%
+                    const randomLeft = Math.random() * 38 + 2; // 2% to 40%
+                    img.style.top = randomTop + '%';
+                    img.style.left = randomLeft + '%';
+                });
     
                 map.on('load', () => {
                     // Try to load real districts from geojson
