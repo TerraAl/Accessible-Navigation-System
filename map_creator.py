@@ -11,7 +11,7 @@ import os
 import shutil
 import geopandas as gpd
 import osmnx as ox
-import folium
+# import folium  # Replaced with OpenLayers
 import matplotlib.colors as mcolors
 
 def draw_tula_districts_robust():
@@ -27,7 +27,7 @@ def draw_tula_districts_robust():
         )
     except Exception as e:
         print(f"Критическая ошибка при запросе: {e}")
-        return
+        return ""
 
     # 2. Фильтрация данных
     # Иногда OSM возвращает не только полигоны, но и точки (центры районов).
@@ -38,39 +38,50 @@ def draw_tula_districts_robust():
 
     if len(gdf) == 0:
         print("Районы не найдены. Возможно, изменился admin_level в OSM.")
-        return
+        return ""
 
-    # 3. Создаем карту
-    # Центрируем карту по центроиду всех найденных районов
-    center_lat = gdf.unary_union.centroid.y
-    center_lon = gdf.unary_union.centroid.x
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=11)
+    # 3. Центрируем карту по центроиду всех найденных районов
+    union_geom = gdf.union_all()
+    center_lat = union_geom.centroid.y
+    center_lon = union_geom.centroid.x
 
-    # 4. Рисуем
-    colors = list(mcolors.TABLEAU_COLORS.values())
+    # 4. Рисуем с OpenLayers
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
 
     # Сбрасываем индекс, чтобы итерироваться удобно
     gdf = gdf.reset_index()
 
-    for idx, row in gdf.iterrows():
-        # Пытаемся получить понятное имя. В OSM оно часто в поле 'name'
-        district_name = row.get('name', f"Район {idx}")
+    # Подготавливаем GeoJSON для районов
+    districts_geojson = {
+        "type": "FeatureCollection",
+        "features": []
+    }
 
+    for idx, row in gdf.iterrows():
+        district_name = row.get('name', f"Район {idx}")
         color = colors[idx % len(colors)]
 
-        folium.GeoJson(
-            row['geometry'],
-            name=district_name,
-            style_function=lambda x, color=color: {
-                'fillColor': color,
-                'color': 'black',
-                'weight': 2,
-                'fillOpacity': 0.4
-            },
-            tooltip=folium.Tooltip(district_name)
-        ).add_to(m)
+        # Преобразуем геометрию в GeoJSON
+        geom = row['geometry']
+        if geom.geom_type == 'Polygon':
+            coords = [list(geom.exterior.coords)]
+        elif geom.geom_type == 'MultiPolygon':
+            coords = [list(p.exterior.coords) for p in geom.geoms]
+        else:
+            continue
 
-    folium.LayerControl().add_to(m)
+        feature = {
+            "type": "Feature",
+            "properties": {
+                "name": district_name,
+                "color": color
+            },
+            "geometry": {
+                "type": "MultiPolygon" if geom.geom_type == 'MultiPolygon' else "Polygon",
+                "coordinates": coords
+            }
+        }
+        districts_geojson["features"].append(feature)
 
     # Добавляем объекты доступности
     conn = sqlite3.connect("db/accessibility.db")
@@ -85,22 +96,162 @@ def draw_tula_districts_robust():
         'светофор_звуковой': '#10b981', 'поручни': '#a16207', 'понижение_бордюра': '#84cc16'
     }
 
+    accessibility_features = []
     for obj in objects:
         feature_type, lat, lon, desc, addr = obj
         color = color_map.get(feature_type, '#6b7280')
-        folium.CircleMarker(
-            location=[lat, lon],
-            radius=6,
-            color=color,
-            fill=True,
-            fill_color=color,
-            fill_opacity=0.8,
-            popup=f"<b>{feature_type.replace('_', ' ').title()}</b><br>{desc}<br><small>{addr}</small>"
-        ).add_to(m)
+        feature = {
+            "type": "Feature",
+            "properties": {
+                "feature_type": feature_type,
+                "description": desc,
+                "address": addr,
+                "color": color
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lon, lat]
+            }
+        }
+        accessibility_features.append(feature)
 
-    output_file = "tula_districts/tula_districts_fixed.html"
-    m.save(output_file)
-    print(f"Карта успешно сохранена: {output_file}")
+    accessibility_geojson = {
+        "type": "FeatureCollection",
+        "features": accessibility_features
+    }
+
+    # Генерируем HTML фрагмент с OpenLayers
+    map_id = "map_78d4ed66ec23f47bc495883bb5cacab4"
+    html_content = f"""
+    <div id="{map_id}" style="position: relative; width: 100%; height: 500px; border-radius: 10px; margin-bottom: 30px;"></div>
+    <div id="popup_{map_id}" class="ol-popup" style="position: absolute; background-color: white; box-shadow: 0 1px 4px rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; border: 1px solid #cccccc; bottom: 12px; left: -50px; min-width: 280px; display: none;">
+        <a href="#" id="popup-closer_{map_id}" class="ol-popup-closer"></a>
+        <div id="popup-content_{map_id}"></div>
+    </div>
+    <script>
+        // Данные районов
+        const districtsData_{map_id.replace('-', '_')} = {json.dumps(districts_geojson)};
+
+        // Данные объектов доступности
+        const accessibilityData_{map_id.replace('-', '_')} = {json.dumps(accessibility_geojson)};
+
+        // Создаем карту
+        const map_{map_id.replace('-', '_')} = new ol.Map({{
+            target: '{map_id}',
+            layers: [
+                new ol.layer.Tile({{
+                    source: new ol.source.OSM()
+                }})
+            ],
+            view: new ol.View({{
+                center: ol.proj.fromLonLat([{center_lon}, {center_lat}]),
+                zoom: 11
+            }})
+        }});
+
+        // Слой районов
+        const districtsSource_{map_id.replace('-', '_')} = new ol.source.Vector({{
+            features: new ol.format.GeoJSON().readFeatures(districtsData_{map_id.replace('-', '_')}, {{
+                featureProjection: 'EPSG:3857'
+            }})
+        }});
+
+        const districtsLayer_{map_id.replace('-', '_')} = new ol.layer.Vector({{
+            source: districtsSource_{map_id.replace('-', '_')},
+            style: function(feature) {{
+                const color = feature.get('color');
+                return new ol.style.Style({{
+                    fill: new ol.style.Fill({{
+                        color: color + '40'  // 25% opacity
+                    }}),
+                    stroke: new ol.style.Stroke({{
+                        color: 'black',
+                        width: 2
+                    }})
+                }});
+            }}
+        }});
+
+        map_{map_id.replace('-', '_')}.addLayer(districtsLayer_{map_id.replace('-', '_')});
+
+        // Слой объектов доступности
+        const accessibilitySource_{map_id.replace('-', '_')} = new ol.source.Vector({{
+            features: new ol.format.GeoJSON().readFeatures(accessibilityData_{map_id.replace('-', '_')}, {{
+                featureProjection: 'EPSG:3857'
+            }})
+        }});
+
+        const accessibilityLayer_{map_id.replace('-', '_')} = new ol.layer.Vector({{
+            source: accessibilitySource_{map_id.replace('-', '_')},
+            style: function(feature) {{
+                const color = feature.get('color');
+                return new ol.style.Style({{
+                    image: new ol.style.Circle({{
+                        radius: 6,
+                        fill: new ol.style.Fill({{
+                            color: color
+                        }}),
+                        stroke: new ol.style.Stroke({{
+                            color: 'white',
+                            width: 2
+                        }})
+                    }})
+                }});
+            }}
+        }});
+
+        map_{map_id.replace('-', '_')}.addLayer(accessibilityLayer_{map_id.replace('-', '_')});
+
+        // Popup
+        const popup_{map_id.replace('-', '_')} = new ol.Overlay({{
+            element: document.getElementById('popup_{map_id}'),
+            positioning: 'bottom-center',
+            stopEvent: false,
+            offset: [0, -10]
+        }});
+        map_{map_id.replace('-', '_')}.addOverlay(popup_{map_id.replace('-', '_')});
+
+        const popupCloser_{map_id.replace('-', '_')} = document.getElementById('popup-closer_{map_id}');
+        popupCloser_{map_id.replace('-', '_')}.onclick = function() {{
+            popup_{map_id.replace('-', '_')}.setPosition(undefined);
+            popupCloser_{map_id.replace('-', '_')}.blur();
+            return false;
+        }};
+
+        // Обработчик клика для popup
+        map_{map_id.replace('-', '_')}.on('singleclick', function(evt) {{
+            const feature = map_{map_id.replace('-', '_')}.forEachFeatureAtPixel(evt.pixel, function(feature) {{
+                return feature;
+            }});
+
+            if (feature) {{
+                const properties = feature.getProperties();
+                let content = '';
+                if (properties.name) {{
+                    content = `<b>${{properties.name}}</b>`;
+                }} else if (properties.feature_type) {{
+                    content = `<b>${{properties.feature_type.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}}</b><br>${{properties.description}}<br><small>${{properties.address}}</small>`;
+                }}
+
+                if (content) {{
+                    document.getElementById('popup-content_{map_id}').innerHTML = content;
+                    popup_{map_id.replace('-', '_')}.setPosition(evt.coordinate);
+                }}
+            }} else {{
+                popup_{map_id.replace('-', '_')}.setPosition(undefined);
+            }}
+        }});
+
+        // Изменяем курсор при наведении
+        map_{map_id.replace('-', '_')}.on('pointermove', function(e) {{
+            const pixel = map_{map_id.replace('-', '_')}.getEventPixel(e.originalEvent);
+            const hit = map_{map_id.replace('-', '_')}.hasFeatureAtPixel(pixel);
+            map_{map_id.replace('-', '_')}.getTarget().style.cursor = hit ? 'pointer' : '';
+        }});
+    </script>
+    """
+
+    return html_content
 
 
 def get_tula_districts_from_osm():
@@ -994,6 +1145,14 @@ try:
                 background: #fff !important;
                 color: #000 !important;
             }
+            .high-contrast .route-info {
+                background: #333 !important;
+                color: #fff !important;
+            }
+            .high-contrast .route-info pre {
+                background: #333 !important;
+                color: #fff !important;
+            }
             .content {
                 display: grid;
                 grid-template-columns: 400px 1fr;
@@ -1886,36 +2045,62 @@ try:
 
     @app.route('/api/suggest_address')
     def api_suggest_address():
-        query = request.args.get('q', '').strip().lower()
+        query = request.args.get('q', '').strip()
         if not query:
             return jsonify([])
-        conn = sqlite3.connect(nav_system.db.db_path)
-        cursor = conn.cursor()
-        # Get from accessibility_objects
-        cursor.execute("SELECT DISTINCT address FROM accessibility_objects WHERE LOWER(address) LIKE ? LIMIT 5", ('%' + query + '%',))
-        db_addresses = [row[0] for row in cursor.fetchall()]
-        # Get from user_submissions
-        cursor.execute("SELECT DISTINCT address FROM user_submissions WHERE LOWER(address) LIKE ? LIMIT 5", ('%' + query + '%',))
-        db_addresses.extend([row[0] for row in cursor.fetchall()])
-        conn.close()
-        # Remove duplicates
-        unique_addresses = list(set(db_addresses))[:5]
-        if len(unique_addresses) < 5:
-            # Fallback to OSM
+        original_query = query
+        query_lower = query.lower()
+        suggestions = []
+
+        # Search organizations first
+        for org in organizations:
+            if query_lower in org.name.lower() or query_lower in org.address.lower():
+                suggestions.append(f"{org.name} - {org.address}")
+                if len(suggestions) >= 5:
+                    break
+
+        if len(suggestions) < 5:
+            conn = sqlite3.connect(nav_system.db.db_path)
+            cursor = conn.cursor()
+            # Get from accessibility_objects - prioritize starts with, then contains
+            cursor.execute("SELECT DISTINCT address FROM accessibility_objects WHERE LOWER(address) LIKE ? LIMIT 10", (query_lower + '%',))
+            starts_with = [row[0] for row in cursor.fetchall()]
+            cursor.execute("SELECT DISTINCT address FROM accessibility_objects WHERE LOWER(address) LIKE ? AND LOWER(address) NOT LIKE ? LIMIT 10", ('%' + query_lower + '%', query_lower + '%'))
+            contains = [row[0] for row in cursor.fetchall()]
+            db_addresses = starts_with + contains
+            # Get from user_submissions
+            cursor.execute("SELECT DISTINCT address FROM user_submissions WHERE LOWER(address) LIKE ? LIMIT 10", (query_lower + '%',))
+            starts_with_sub = [row[0] for row in cursor.fetchall()]
+            cursor.execute("SELECT DISTINCT address FROM user_submissions WHERE LOWER(address) LIKE ? AND LOWER(address) NOT LIKE ? LIMIT 10", ('%' + query_lower + '%', query_lower + '%'))
+            contains_sub = [row[0] for row in cursor.fetchall()]
+            db_addresses.extend(starts_with_sub + contains_sub)
+            conn.close()
+            # Remove duplicates while preserving order
+            seen = set()
+            for addr in db_addresses:
+                if addr not in seen and len(suggestions) < 5:
+                    suggestions.append(addr)
+                    seen.add(addr)
+
+        if len(suggestions) < 5:
+            # Fallback to OSM - add Tula if not specified
+            osm_query = original_query
+            if not any(city in original_query.lower() for city in ['тула', 'moscow', 'спб', 'екатеринбург', 'санкт-петербург']):
+                osm_query += ", Тула"
             try:
                 response = requests.get(
                     f"{nav_system.osm.base_url}/search",
-                    params={"q": request.args.get('q', ''), "format": "json", "limit": 5 - len(unique_addresses), "countrycodes": "ru"},
+                    params={"q": osm_query, "format": "json", "limit": 5 - len(suggestions), "countrycodes": "ru"},
                     headers=nav_system.osm.headers,
                     timeout=5
                 )
                 response.raise_for_status()
                 data = response.json()
                 osm_addresses = [clean_address(item['display_name']) for item in data]
-                unique_addresses.extend(osm_addresses)
+                suggestions.extend(osm_addresses)
             except Exception as e:
                 print(f"Suggest error: {e}")
-        return jsonify(unique_addresses[:5])
+        return jsonify(suggestions[:5])
 
     @app.route('/api/reverse_geocode')
     def api_reverse_geocode():
@@ -2255,8 +2440,9 @@ try:
         photo = request.files['photo']
         if photo and photo.filename:
             filename = secure_filename(photo.filename)
-            photo_path = filename
+            photo_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             photo.save(photo_path)
+            photo_path = filename  # store relative path
         else:
             photo_path = ""
         nav_system.db.add_user_submission(feature_type, description, address, photo_path)
@@ -2320,8 +2506,8 @@ try:
                 }
                 .btn {
                     padding: 15px 25px;
-                    border: none;
-                    border-radius: 12px;
+                    border: 2px solid;
+                    border-radius: 0;
                     font-size: 1.1em;
                     font-weight: 600;
                     cursor: pointer;
@@ -2332,47 +2518,41 @@ try:
                     overflow: hidden;
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
-                }
-                .btn::before {
-                    content: '';
-                    position: absolute;
-                    top: 0;
-                    left: -100%;
-                    width: 100%;
-                    height: 100%;
-                    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-                    transition: left 0.5s;
-                }
-                .btn:hover::before {
-                    left: 100%;
+                    background: transparent;
                 }
                 .btn-approve {
-                    background: linear-gradient(135deg, #10b981, #059669);
-                    color: white;
+                    background: transparent;
+                    color: #10b981;
+                    border-color: #10b981;
                     box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
                 }
                 .btn-approve:hover {
-                    background: linear-gradient(135deg, #059669, #047857);
+                    background: #10b981;
+                    color: white;
                     transform: translateY(-3px) scale(1.05);
                     box-shadow: 0 8px 25px rgba(16, 185, 129, 0.6);
                 }
                 .btn-reject {
-                    background: linear-gradient(135deg, #ef4444, #dc2626);
-                    color: white;
+                    background: transparent;
+                    color: #ef4444;
+                    border-color: #ef4444;
                     box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
                 }
                 .btn-reject:hover {
-                    background: linear-gradient(135deg, #dc2626, #b91c1c);
+                    background: #ef4444;
+                    color: white;
                     transform: translateY(-3px) scale(1.05);
                     box-shadow: 0 8px 25px rgba(239, 68, 68, 0.6);
                 }
                 .btn-secondary {
-                    background: linear-gradient(135deg, #f0f0f0, #e0e0e0);
+                    background: transparent;
                     color: #333;
+                    border-color: #333;
                     box-shadow: 0 4px 15px rgba(0,0,0,0.1);
                 }
                 .btn-secondary:hover {
-                    background: linear-gradient(135deg, #e0e0e0, #d0d0d0);
+                    background: #333;
+                    color: white;
                     transform: translateY(-2px) scale(1.02);
                     box-shadow: 0 6px 20px rgba(0,0,0,0.15);
                 }
@@ -2380,6 +2560,32 @@ try:
                     text-align: center;
                     padding: 50px;
                     color: #666;
+                }
+                .admin-links {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                    justify-content: center;
+                    margin-top: 20px;
+                }
+                .admin-links a {
+                    color: white;
+                    text-decoration: none;
+                }
+                .btn-accessibility {
+                    background: rgba(255,255,255,0.4);
+                    border: 2px solid white;
+                    color: white;
+                    padding: 10px 15px;
+                    border-radius: 0;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                    font-weight: bold;
+                }
+                .btn-accessibility:hover {
+                    background: rgba(255,255,255,0.6);
+                    transform: translateY(-1px);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
                 }
             </style>
         </head>
@@ -2389,10 +2595,10 @@ try:
                     <h1>🔧 Админ панель</h1>
                     <p>Управление объектами доступности</p>
                     <div class="admin-links">
-                        <a href="/admin/districts">Статистика по районам</a>
-                        <a href="/admin/change_password">Изменить пароль</a>
-                        <a href="/admin/add_admin">Добавить админа</a>
-                        <a href="/admin/logout">Выйти</a>
+                        <a href="/admin/districts" class="btn-accessibility">Статистика по районам</a>
+                        <a href="/admin/change_password" class="btn-accessibility">Изменить пароль</a>
+                        <a href="/admin/add_admin" class="btn-accessibility">Добавить админа</a>
+                        <a href="/admin/logout" class="btn-accessibility">Выйти</a>
                     </div>
                 </div>
                 <div class="content">
@@ -2828,12 +3034,12 @@ try:
             return redirect(url_for('admin_login'))
 
         # Генерируем карту районов
-        draw_tula_districts_robust()
+        map_html = draw_tula_districts_robust()
 
         # Получаем статистику по районам
         districts_stats = get_district_statistics()
 
-        return render_template('admin_districts.html', districts_stats=districts_stats)
+        return render_template('admin_districts.html', districts_stats=districts_stats, map_html=map_html)
 
     @app.route('/admin/export_districts')
     def export_districts():

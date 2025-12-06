@@ -4,9 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Статистика по районам</title>
-    <link href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css' rel='stylesheet' />
-    <script src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -31,8 +36,11 @@
         }
         .header h1 { font-size: 2.5em; margin-bottom: 10px; }
         .header p { font-size: 1.2em; opacity: 0.9; }
-        .header .links { margin-top: 20px; }
-        .header .links a { color: white; margin: 0 10px; text-decoration: none; }
+        .header .links { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+        .header .links a { color: white; text-decoration: none; }
+        .header .admin-links { margin-top: 40px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+        .header .admin-links a { color: white; text-decoration: none; }
+        .accessibility-buttons { margin-top: 40px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
         .content {
             padding: 30px;
         }
@@ -69,11 +77,16 @@
             padding: 20px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        #map {
+        #map_78d4ed66ec23f47bc495883bb5cacab4 {
+            position: relative;
+            width: 100.0%;
             height: 500px;
+            left: 0.0%;
+            top: 0.0%;
             border-radius: 10px;
             margin-bottom: 30px;
         }
+        .leaflet-container { font-size: 1rem; }
         .table-container {
             background: white;
             border-radius: 10px;
@@ -96,23 +109,82 @@
         }
         .btn {
             padding: 12px 20px;
-            border: none;
-            border-radius: 8px;
+            border: 2px solid #667eea;
+            border-radius: 0;
             font-size: 1em;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: transparent;
+            color: #667eea;
             text-decoration: none;
             display: inline-block;
         }
         .btn:hover {
+            background: #667eea;
+            color: white;
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
         .export-btn {
             margin-bottom: 20px;
+        }
+        body.high-contrast {
+            background: #000 !important;
+            color: #fff !important;
+        }
+        body.high-contrast .container {
+            background: #333 !important;
+        }
+        body.high-contrast .stat-card {
+            background: #444 !important;
+            color: #fff !important;
+        }
+        body.high-contrast .stat-card h3 {
+            color: #fff !important;
+        }
+        body.high-contrast .stat-value {
+            color: #fff !important;
+        }
+        body.high-contrast .chart-wrapper {
+            background: #333 !important;
+        }
+        body.high-contrast .table-container {
+            background: #333 !important;
+        }
+        body.high-contrast th {
+            background: #555 !important;
+            color: #fff !important;
+        }
+        body.high-contrast td {
+            color: #fff !important;
+            border-bottom-color: #666 !important;
+        }
+        body.high-contrast .ol-popup {
+            background: #333 !important;
+            color: #fff !important;
+            border-color: #fff !important;
+        }
+        body.high-contrast .ol-popup::after {
+            border-top-color: #333 !important;
+        }
+        .btn-accessibility {
+            background: rgba(255,255,255,0.4);
+            border: 2px solid white;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 0;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        .btn-accessibility:hover {
+            background: rgba(255,255,255,0.6);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .btn-accessibility.active {
+            background: rgba(255,255,255,0.7);
         }
     </style>
 </head>
@@ -122,8 +194,16 @@
             <h1>📊 Статистика доступности по районам Тулы</h1>
             <p>Анализ объектов доступности в административных районах</p>
             <div class="links">
-                <a href="/admin">← Админ панель</a>
-                <a href="/admin/logout">Выйти</a>
+                <a href="/admin" class="btn-accessibility">← Админ панель</a>
+                <a href="/admin/logout" class="btn-accessibility">Выйти</a>
+            </div>
+            <div class="admin-links">
+                <a href="/admin/change_password" class="btn-accessibility">Изменить пароль</a>
+                <a href="/admin/add_admin" class="btn-accessibility">Добавить админа</a>
+            </div>
+            <div class="accessibility-buttons" style="margin-top: 20px;">
+                <button id="elementVoiceBtn" class="btn-accessibility">🔊 Озвучивание элементов</button>
+                <button id="contrastBtn" class="btn-accessibility">👓 Режим для слабовидящих</button>
             </div>
         </div>
         <div class="content">
@@ -146,7 +226,7 @@
                 </div>
             </div>
 
-            <iframe src="/tula_districts/tula_districts_fixed.html" width="100%" height="500" frameborder="0"></iframe>
+            {{ map_html|safe }}
 
             <div class="table-container">
                 <h3>Детальная статистика</h3>
@@ -248,6 +328,73 @@
                         text: 'Распределение по типам инвалидности'
                     }
                 }
+            }
+        });
+
+        // Озвучивание элементов
+        let elementVoiceMode = false;
+        document.getElementById('elementVoiceBtn').addEventListener('click', () => {
+            elementVoiceMode = !elementVoiceMode;
+            document.getElementById('elementVoiceBtn').textContent = elementVoiceMode ? '🔊 Выключить озвучивание' : '🔊 Озвучивание элементов';
+            document.getElementById('elementVoiceBtn').classList.toggle('active', elementVoiceMode);
+            if (elementVoiceMode) {
+                speakText('Озвучивание элементов включено');
+            } else {
+                speakText('Озвучивание элементов выключено');
+            }
+        });
+
+        // Режим для слабовидящих
+        let highContrast = false;
+        document.getElementById('contrastBtn').addEventListener('click', () => {
+            highContrast = !highContrast;
+            document.body.classList.toggle('high-contrast', highContrast);
+            document.getElementById('contrastBtn').classList.toggle('active', highContrast);
+        });
+
+        // Функция озвучивания
+        function speakText(text, callback = null) {
+            if (!('speechSynthesis' in window)) return;
+            text = text.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '');
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'ru-RU';
+            utter.rate = 0.9;
+            utter.pitch = 0.9;
+            utter.volume = 0.9;
+            const voices = speechSynthesis.getVoices();
+            const russianVoice = voices.find(v => v.lang.startsWith('ru') && (v.name.includes('Male') || v.name.includes('мужской') || !v.name.includes('Female')));
+            if (russianVoice) utter.voice = russianVoice;
+            if (callback) utter.onend = callback;
+            speechSynthesis.speak(utter);
+        }
+
+        // Озвучивание элементов интерфейса при включенном режиме
+        function announceElement(element, eventType) {
+            if (!elementVoiceMode || !('speechSynthesis' in window)) return;
+            let text = '';
+            if (element.tagName === 'INPUT' || element.tagName === 'SELECT' || element.tagName === 'TEXTAREA') {
+                const label = element.previousElementSibling ? element.previousElementSibling.textContent.trim() : element.placeholder || element.getAttribute('title') || 'Поле ввода';
+                text = label;
+                if (eventType === 'change' && element.tagName === 'SELECT') {
+                    const selected = element.options[element.selectedIndex].text;
+                    text += '. Выбрано: ' + selected;
+                }
+            } else if (element.tagName === 'BUTTON' || element.tagName === 'A') {
+                text = element.textContent.replace(/[^\w\sа-яё]/gi, '').trim() || element.getAttribute('title') || 'Кнопка';
+            }
+            if (text) {
+                speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+            }
+        }
+
+        // Добавляем listeners ко всем интерактивным элементам
+        document.querySelectorAll('input, select, textarea, button, a').forEach(el => {
+            el.addEventListener('focus', () => announceElement(el, 'focus'));
+            if (el.tagName === 'SELECT') {
+                el.addEventListener('change', () => announceElement(el, 'change'));
+            }
+            if (el.tagName === 'BUTTON' || el.tagName === 'A') {
+                el.addEventListener('click', () => announceElement(el, 'click'));
             }
         });
 
