@@ -2,3 +2,7 @@ flask
 flask-cors
 requests
 werkzeug
+openpyxl
+osmnx
+folium
+geopandas
