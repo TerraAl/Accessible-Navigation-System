@@ -248,6 +248,9 @@ class OpenStreetMapAPI:
         }
 
     def geocode(self, address: str) -> Optional[Tuple[float, float]]:
+        # Default to Tula if no city specified
+        if not any(city in address.lower() for city in ['тула', 'moscow', 'спб', 'екатеринбург']):
+            address += ", Тула"
         try:
             response = requests.get(
                 f"{self.base_url}/search",
@@ -261,6 +264,22 @@ class OpenStreetMapAPI:
                 return float(data[0]["lat"]), float(data[0]["lon"])
         except Exception as e:
             print(f"Геокодирование ошибка: {e}")
+        return None
+
+    def reverse_geocode(self, lat: float, lon: float) -> Optional[str]:
+        try:
+            response = requests.get(
+                f"{self.base_url}/reverse",
+                params={"lat": lat, "lon": lon, "format": "json", "addressdetails": 1},
+                headers=self.headers,
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data and 'display_name' in data:
+                return data['display_name']
+        except Exception as e:
+            print(f"Обратное геокодирование ошибка: {e}")
         return None
 
     def get_route(self, start: Tuple[float, float], end: Tuple[float, float]):
@@ -552,7 +571,7 @@ try:
 
     organizations = parser.social_organizations
     
-    HTML_TEMPLATE = """
+    HTML_TEMPLATE = r"""
     <!DOCTYPE html>
     <html lang="ru">
     <head>
@@ -589,6 +608,22 @@ try:
             .header .links a { color: white; margin: 0 10px; text-decoration: none; }
             .accessibility-buttons { margin-top: 20px; }
             .btn-accessibility {
+                background: rgba(255,255,255,0.2);
+                border: 1px solid rgba(255,255,255,0.3);
+                color: white;
+                padding: 8px 12px;
+                margin: 0 5px;
+                border-radius: 5px;
+                cursor: pointer;
+                transition: background 0.3s;
+            }
+            .btn-accessibility:hover { background: rgba(255,255,255,0.3); }
+            .btn-accessibility.active { background: rgba(255,255,255,0.5); }
+            body.high-contrast { background: black; color: white; }
+            body.high-contrast .container { background: #333; }
+            body.large-font { font-size: 1.2em; }
+            body.large-font h1 { font-size: 3em; }
+            body.large-font .btn { font-size: 1.3em; }
                 background: rgba(255,255,255,0.2);
                 color: white;
                 border: 1px solid white;
@@ -763,7 +798,8 @@ try:
                 <h1>♿ Доступная навигация</h1>
                 <p>Персонализированные маршруты для людей с ограниченными возможностями</p>
                 <div class="accessibility-buttons">
-                    <button id="voiceBtn" class="btn-accessibility">🔊 Голосовое сопровождение</button>
+                    <button id="elementVoiceBtn" class="btn-accessibility">🔊 Озвучивание элементов</button>
+                    <button id="routeVoiceBtn" class="btn-accessibility" style="display:none;">🔊 Озвучить маршрут</button>
                     <button id="contrastBtn" class="btn-accessibility">👓 Режим для слабовидящих</button>
                 </div>
             </div>
@@ -809,10 +845,6 @@ try:
                         <a href="/submit" class="btn btn-secondary">
                             <span class="icon">➕</span>Добавить объект доступности
                         </a>
-
-                        <button type="button" class="btn btn-voice" id="voiceBtn">
-                            <span class="icon">🔊</span>Озвучить маршрут
-                        </button>
                         </div>
                     </form>
                     
@@ -1062,12 +1094,14 @@ try:
                     const data = await res.json();
 
                     if (data.success) {
+                        currentRoute = data;
                         displayRoute(data);
                         document.getElementById('routeDescription').textContent = data.description;
                         document.getElementById('routeInfo').style.display = 'block';
-                        document.getElementById('voiceBtn').style.display = 'block';
+                        document.getElementById('routeVoiceBtn').style.display = 'inline-block';
                     } else {
                         alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+                        document.getElementById('routeVoiceBtn').style.display = 'none';
                     }
                 } catch (err) {
                     alert('Сервер недоступен');
@@ -1076,26 +1110,138 @@ try:
                 }
             });
 
-            // Озвучка
-            document.getElementById('voiceBtn').addEventListener('click', () => {
-                if (!currentRoute || !('speechSynthesis' in window)) return;
+            // Клик на карте для выбора адреса
+            let selectedInput = null;
+            document.getElementById('startAddress').addEventListener('focus', () => selectedInput = 'start');
+            document.getElementById('endAddress').addEventListener('focus', () => selectedInput = 'end');
+
+            map.on('click', async (e) => {
+                if (!selectedInput) return;
+                const { lng, lat } = e.lngLat;
+                try {
+                    const res = await fetch(`/api/reverse_geocode?lat=${lat}&lon=${lng}`);
+                    const data = await res.json();
+                    if (data.address) {
+                        document.getElementById(selectedInput === 'start' ? 'startAddress' : 'endAddress').value = data.address;
+                        selectedInput = null;
+                    }
+                } catch (err) {
+                    console.error('Reverse geocode failed:', err);
+                }
+            });
+
+            // Доступность
+            let elementVoiceMode = false;
+            let highContrast = false;
+            let largeFont = false;
+
+            document.getElementById('elementVoiceBtn').addEventListener('click', () => {
+                elementVoiceMode = !elementVoiceMode;
+                document.getElementById('elementVoiceBtn').textContent = elementVoiceMode ? '🔊 Выключить озвучивание' : '🔊 Озвучивание элементов';
+                document.getElementById('elementVoiceBtn').classList.toggle('active', elementVoiceMode);
+            });
+
+            document.getElementById('contrastBtn').addEventListener('click', () => {
+                highContrast = !highContrast;
+                document.body.classList.toggle('high-contrast', highContrast);
+                document.getElementById('contrastBtn').classList.toggle('active', highContrast);
+                if (highContrast) {
+                    // Озвучить все элементы интерфейса для слабовидящих
+                    announceInterface();
+                }
+            });
+
+            // Функция озвучивания с более человеческим голосом
+            function speakText(text, callback = null) {
+                if (!('speechSynthesis' in window)) return;
+                // Убираем эмодзи из текста
+                text = text.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '');
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.lang = 'ru-RU';
+                utter.rate = 0.9;  // Более естественная скорость
+                utter.pitch = 0.9; // Более низкая высота для мужского голоса
+                utter.volume = 0.9;
+                // Попытка выбрать мужской русский голос
+                const voices = speechSynthesis.getVoices();
+                const russianVoice = voices.find(v => v.lang.startsWith('ru') && (v.name.includes('Male') || v.name.includes('мужской') || !v.name.includes('Female')));
+                if (russianVoice) utter.voice = russianVoice;
+                if (callback) utter.onend = callback;
+                speechSynthesis.speak(utter);
+            }
+
+            // Озвучка маршрута
+            function announceRoute() {
+                if (!currentRoute) return;
                 speechSynthesis.cancel();
                 const texts = [
                     `Маршрут от ${currentRoute.start.address} до ${currentRoute.end.address}`,
-                    `Расстояние: ${currentRoute.total_distance} метров. Время: ${currentRoute.duration_minutes} минут`,
-                    ...currentRoute.accessibility_objects.map(o => `${o.feature_type.replace(/_/g, ' ')} — ${o.description}`),
+                    `Общая длина: ${currentRoute.total_distance} метров. Примерное время в пути: ${currentRoute.duration_minutes} минут`,
+                    ...currentRoute.accessibility_objects.map(o => `${o.feature_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}: ${o.description}`),
                     "Приятного и безопасного пути!"
                 ];
                 let i = 0;
-                const speak = () => {
+                const speakNext = () => {
                     if (i >= texts.length) return;
-                    const utter = new SpeechSynthesisUtterance(texts[i++]);
-                    utter.lang = 'ru-RU';
-                    utter.rate = 0.9;
-                    utter.onend = speak;
-                    speechSynthesis.speak(utter);
+                    speakText(texts[i++], speakNext);
                 };
-                speak();
+                speakNext();
+            }
+
+            // Озвучка интерфейса для слабовидящих
+            function announceInterface() {
+                speechSynthesis.cancel();
+                const elements = [
+                    "Доступная навигация для людей с ограниченными возможностями",
+                    "Поле откуда - введите начальный адрес или нажмите для выбора на карте",
+                    "Поле куда - введите конечный адрес или выберите организацию",
+                    "Выберите тип ограничений мобильности: колясочник, слабовидящий, или опора на трость",
+                    "Кнопка Построить маршрут",
+                    "Кнопка Использовать мою геолокацию",
+                    "Кнопка Добавить объект доступности",
+                    "Кнопка Озвучить маршрут - доступна после построения маршрута",
+                    "Карта - кликните для выбора адреса"
+                ];
+                let i = 0;
+                const speakNext = () => {
+                    if (i >= elements.length) return;
+                    speakText(elements[i++], speakNext);
+                };
+                speakNext();
+            }
+
+            document.getElementById('routeVoiceBtn').addEventListener('click', () => {
+                if (!currentRoute) return;
+                announceRoute();
+            });
+
+            // Озвучивание элементов интерфейса при включенном режиме
+            function announceElement(element, eventType) {
+                if (!elementVoiceMode || !('speechSynthesis' in window)) return;
+                let text = '';
+                if (element.tagName === 'INPUT' || element.tagName === 'SELECT' || element.tagName === 'TEXTAREA') {
+                    const label = element.previousElementSibling ? element.previousElementSibling.textContent.trim() : element.placeholder || element.getAttribute('title') || 'Поле ввода';
+                    text = label;
+                    if (eventType === 'change' && element.tagName === 'SELECT') {
+                        const selected = element.options[element.selectedIndex].text;
+                        text += '. Выбрано: ' + selected;
+                    }
+                } else if (element.tagName === 'BUTTON') {
+                    text = element.textContent.replace(/[^\w\sа-яё]/gi, '').trim() || element.getAttribute('title') || 'Кнопка';
+                }
+                if (text) {
+                    speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+                }
+            }
+
+            // Добавляем listeners ко всем интерактивным элементам
+            document.querySelectorAll('input, select, textarea, button').forEach(el => {
+                el.addEventListener('focus', () => announceElement(el, 'focus'));
+                if (el.tagName === 'SELECT') {
+                    el.addEventListener('change', () => announceElement(el, 'change'));
+                }
+                if (el.tagName === 'BUTTON') {
+                    el.addEventListener('click', () => announceElement(el, 'click'));
+                }
             });
 
             map.on('load', () => console.log("MapLibre готова — всё идеально!"));
