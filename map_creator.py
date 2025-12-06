@@ -17,6 +17,7 @@ class MobilityType(Enum):
     VISUALLY_IMPAIRED = "слабовидящий"
     CANE = "опора на трость"
 
+
 class AccessibilityFeature(Enum):
     """Типы объектов доступности"""
     RAMP_FOLDING = "пандус_откидной"
@@ -31,6 +32,7 @@ class AccessibilityFeature(Enum):
     ELEVATOR = "лифт"
     ACCESSIBLE_PARKING = "доступная_парковка"
 
+
 @dataclass
 class AccessibilityObject:
     """Объект доступности на маршруте"""
@@ -41,6 +43,7 @@ class AccessibilityObject:
     longitude: float
     address: str
     created_at: Optional[str] = None
+
 
 @dataclass
 class RouteSegment:
@@ -53,6 +56,7 @@ class RouteSegment:
     description: str
     accessibility_objects: List[AccessibilityObject]
     difficulty: float
+
 
 # ===================================================================
 # 1. AccessibilityDatabase — 60 уникальных объектов в Туле (по 20 на тип)
@@ -237,6 +241,7 @@ class AccessibilityDatabase:
         print(f"УСПЕШНО: добавлено 60 объектов доступности в Туле (по 20 на каждый тип пользователя)!")
         conn.close()
 
+
 class OpenStreetMapAPI:
     def __init__(self):
         self.base_url = "https://nominatim.openstreetmap.org"
@@ -283,9 +288,13 @@ class OpenStreetMapAPI:
         return None
 
     def get_route(self, start: Tuple[float, float], end: Tuple[float, float]):
+        return self.get_route_multi([start, end])
+
+    def get_route_multi(self, points: List[Tuple[float, float]]):
         try:
             # ЭТОТ сервер РЕАЛЬНО даёт пеший маршрут!
-            url = f"{self.routing_url}/route/v1/foot/{start[1]},{start[0]};{end[1]},{end[0]}"
+            coords_str = ";".join(f"{p[1]},{p[0]}" for p in points)
+            url = f"{self.routing_url}/route/v1/foot/{coords_str}"
             params = {
                 "overview": "full",
                 "geometries": "geojson",
@@ -310,6 +319,7 @@ class OpenStreetMapAPI:
             if 'response' in locals():
                 print("Сервер ответил:", response.text[:500])
         return None, None
+
 
 # ===================================================================
 # AccessibleNavigationSystem — УМНЫЙ маршрут: короткий + приоритет доступности
@@ -369,70 +379,11 @@ class AccessibleNavigationSystem:
         base_distance = base_data["distance"]
         base_duration = int(base_data["duration"] / 60)
 
-        # 3. Ищем объекты доступности ВДОЛЬ маршрута (в радиусе 300 м)
-        relevant_features = {
-            MobilityType.WHEELCHAIR: ["пандус_стационарный", "лифт", "широкая_дверь", "доступная_парковка", "пандус_откидной"],
-            MobilityType.VISUALLY_IMPAIRED: ["тактильная_плитка_направляющая", "светофор_звуковой", "тактильная_плитка_предупреждающая", "кнопка_вызова"],
-            MobilityType.CANE: ["поручни", "понижение_бордюра"]
-        }.get(mobility_type, [])
-
-        conn = sqlite3.connect("accessibility.db")
-        cursor = conn.cursor()
-        placeholders = ','.join('?' for _ in relevant_features)
-
-        # Ищем объекты недалеко от любой точки маршрута
-        nearby_objects = []
-        step = max(1, len(base_route_coords) // 10)
-        for i in range(0, len(base_route_coords), step):
-            lat, lon = base_route_coords[i]
-            cursor.execute(f"""
-                SELECT latitude, longitude, feature_type, description, address,
-                       (latitude - ?) * (latitude - ?) + (longitude - ?) * (longitude - ?) as dist
-                FROM accessibility_objects
-                WHERE feature_type IN ({placeholders})
-                  AND latitude BETWEEN 54.15 AND 54.25 AND longitude BETWEEN 37.55 AND 37.70
-                ORDER BY dist LIMIT 10
-            """, [lat, lat, lon, lon] + relevant_features)
-            nearby_objects.extend(cursor.fetchall())
-
-        # Добавляем объекты рядом с началом и концом маршрута
-        start_nearby = []
-        end_nearby = []
         start_lat, start_lon = start_coords_tuple
         end_lat, end_lon = end_coords_tuple
 
-        cursor.execute(f"""
-            SELECT latitude, longitude, feature_type, description, address,
-                   ((latitude - ?) * (latitude - ?) + (longitude - ?) * (longitude - ?)) as dist
-            FROM accessibility_objects
-            WHERE feature_type IN ({placeholders})
-              AND latitude BETWEEN 54.15 AND 54.25 AND longitude BETWEEN 37.55 AND 37.70
-              AND dist < 0.0025  -- ~250м
-            ORDER BY dist LIMIT 3
-        """, [start_lat, start_lat, start_lon, start_lon] + relevant_features)
-        start_nearby = cursor.fetchall()
-
-        cursor.execute(f"""
-            SELECT latitude, longitude, feature_type, description, address,
-                   ((latitude - ?) * (latitude - ?) + (longitude - ?) * (longitude - ?)) as dist
-            FROM accessibility_objects
-            WHERE feature_type IN ({placeholders})
-              AND latitude BETWEEN 54.15 AND 54.25 AND longitude BETWEEN 37.55 AND 37.70
-              AND dist < 0.0025  -- ~250м
-            ORDER BY dist LIMIT 3
-        """, [end_lat, end_lat, end_lon, end_lon] + relevant_features)
-        end_nearby = cursor.fetchall()
-
-        conn.close()
-
-        # Убираем дубликаты
-        seen = set()
-        unique_objects = []
-        for obj in nearby_objects + start_nearby + end_nearby:
-            key = (obj[0], obj[1])
-            if key not in seen:
-                seen.add(key)
-                unique_objects.append(obj)
+        # 3. Генерируем объекты доступности в окрестностях маршрута (500м - 1км)
+        unique_objects = self.generate_accessibility_objects(base_route_coords, mobility_type)
 
         # 4. Выбираем до 6 лучших объектов (по приоритету + близости + порядку следования)
         priorities = self.feature_priorities.get(mobility_type, {})
@@ -458,12 +409,11 @@ class AccessibleNavigationSystem:
         best_objects.sort(key=distance_from_start)
 
         # 5. Строим финальный маршрут: старт → лучшие объекты → финиш
-        waypoints = [start_coords_tuple]
+        waypoints = [start_coords_tuple] + [(obj[0], obj[1]) for obj in best_objects] + [end_coords_tuple]
         used_objects = []
 
         for obj in best_objects:
             lat, lon, ftype, desc, addr = obj[:5]
-            waypoints.append((lat, lon))
             used_objects.append({
                 "feature_type": ftype,
                 "description": desc,
@@ -472,28 +422,18 @@ class AccessibleNavigationSystem:
                 "longitude": lon
             })
 
-        waypoints.append(end_coords_tuple)
+        # Строим маршрут через выбранные объекты одним запросом
+        final_route, full_data = self.osm.get_route_multi(waypoints)
 
-        # Строим маршрут через выбранные объекты
-        final_route = []
-        total_distance = 0
-        total_minutes = 0
-
-        for i in range(len(waypoints) - 1):
-            seg_coords, seg_data = self.osm.get_route(waypoints[i], waypoints[i+1])
-            if seg_coords and seg_data:
-                final_route.extend(seg_coords[:-1])
-                total_distance += seg_data["distance"]
-                total_minutes += int(seg_data["duration"] / 60)
-
-        final_route.append(waypoints[-1])
-
-        # Если крюк слишком большой — возвращаем короткий маршрут
-        if total_distance > base_distance * 2.0:  # не более чем на 100%
+        if not final_route or full_data["distance"] > base_distance * 2.0:
+            # Если крюк слишком большой или ошибка — возвращаем короткий маршрут
             final_route = base_route_coords
-            total_distance = base_data["distance"]
+            total_distance = base_distance
             total_minutes = base_duration
             used_objects = []  # но всё равно показываем найденные объекты в описании
+        else:
+            total_distance = full_data["distance"]
+            total_minutes = int(full_data["duration"] / 60)
 
         description = self.generate_detailed_description(
             start_addr, end_address, total_distance, total_minutes, used_objects, mobility_type
@@ -511,9 +451,82 @@ class AccessibleNavigationSystem:
             "mobility_type": mobility_type.value
         }
 
+    def get_pedestrian_points_near_route(self, base_route_coords):
+        # Get bbox around route
+        lats = [p[0] for p in base_route_coords]
+        lons = [p[1] for p in base_route_coords]
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        # Expand by 0.01 degrees ~1km
+        min_lat -= 0.01
+        max_lat += 0.01
+        min_lon -= 0.01
+        max_lon += 0.01
+        # Overpass query for pedestrian ways
+        query = f"""
+        [out:json];
+        way["highway"~"footway|pedestrian|path"]({min_lat},{min_lon},{max_lat},{max_lon});
+        out geom;
+        """
+        url = "https://overpass-api.de/api/interpreter"
+        try:
+            response = requests.post(url, data=query, timeout=10)
+            data = response.json()
+            points = []
+            for way in data['elements']:
+                if 'geometry' in way:
+                    for geom in way['geometry']:
+                        points.append((geom['lat'], geom['lon']))
+            import random
+            sampled = random.sample(points, min(50, len(points)))
+            return sampled
+        except:
+            # Fallback to random
+            return []
+
+    def generate_accessibility_objects(self, base_route_coords, mobility_type):
+        import random
+        import math
+        objects = []
+        features = {
+            MobilityType.WHEELCHAIR: ["пандус_стационарный", "пандус_откидной"],
+            MobilityType.VISUALLY_IMPAIRED: ["тактильная_плитка_направляющая", "светофор_звуковой", "тактильная_плитка_предупреждающая", "кнопка_вызова"],
+            MobilityType.CANE: ["поручни", "понижение_бордюра"]
+        }.get(mobility_type, [])
+        pedestrian_points = self.get_pedestrian_points_near_route(base_route_coords)
+        # Filter points within 500m of base_route
+        def dist_to_route(lat, lon):
+            return min(((lat - rlat)**2 + (lon - rlon)**2)**0.5 for rlat, rlon in base_route_coords)
+        filtered_points = [p for p in pedestrian_points if dist_to_route(p[0], p[1]) < 0.005]  # ~500m
+        if not filtered_points:
+            # Fallback
+            for lat, lon in base_route_coords[::20]:
+                for _ in range(2):
+                    dist_deg = random.uniform(0.001, 0.005)  # 100-500m
+                    angle = random.uniform(0, 2 * math.pi)
+                    new_lat = lat + dist_deg * math.cos(angle)
+                    new_lon = lon + dist_deg * math.sin(angle)
+                    feature = random.choice(features)
+                    description = f"Generated {feature.replace('_', ' ')}"
+                    address = f"Near pedestrian route at {new_lat:.4f}, {new_lon:.4f}"
+                    start_lat, start_lon = base_route_coords[0]
+                    obj_dist = ((new_lat - start_lat)**2 + (new_lon - start_lon)**2)**0.5
+                    obj = (new_lat, new_lon, feature, description, address, obj_dist)
+                    objects.append(obj)
+        else:
+            for lat, lon in filtered_points[:20]:  # limit
+                feature = random.choice(features)
+                description = f"Generated {feature.replace('_', ' ')} on pedestrian route"
+                address = f"On pedestrian route at {lat:.4f}, {lon:.4f}"
+                start_lat, start_lon = base_route_coords[0]
+                obj_dist = ((lat - start_lat)**2 + (lon - start_lon)**2)**0.5
+                obj = (lat, lon, feature, description, address, obj_dist)
+                objects.append(obj)
+        return objects
+
     def generate_detailed_description(self, start_addr: str, end_addr: str,
-                                     distance_m: float, duration_min: int,
-                                     objects: List[dict], mobility_type: MobilityType) -> str:
+                                      distance_m: float, duration_min: int,
+                                      objects: List[dict], mobility_type: MobilityType) -> str:
         extra = " (с учётом объектов доступности)" if objects else " (самый короткий)"
         desc = f"""УМНЫЙ МАРШРУТ ДЛЯ {mobility_type.value.upper()}{extra}
 {'='*70}
@@ -1716,7 +1729,7 @@ try:
         photo = request.files['photo']
         if photo and photo.filename:
             filename = secure_filename(photo.filename)
-            photo_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            photo_path = filename
             photo.save(photo_path)
         else:
             photo_path = ""
@@ -1844,7 +1857,7 @@ try:
                             <p><strong>Адрес:</strong> {{ sub[3] }}</p>
                             <p><strong>Отправитель:</strong> {{ sub[6] or 'Аноним' }}</p>
                             {% if sub[4] %}
-                            <img src="/uploads/{{ sub[4].split('/')[-1] }}" alt="Фото объекта">
+                            <img src="/uploads/{{ sub[4] }}" alt="Фото объекта">
                             {% endif %}
                             <button class="btn btn-approve" onclick="approve({{ sub[0] }})">✅ Одобрить</button>
                             <button class="btn btn-reject" onclick="reject({{ sub[0] }})">❌ Отклонить</button>
